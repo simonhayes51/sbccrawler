@@ -13,9 +13,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt uvicorn[standard]
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Show env and start with full debug logs
-CMD ["/bin/sh","-lc","echo '📦 /app:' && ls -la && echo '🔧 ENV:' && env | sort && echo '🚀 Starting…' && python -X dev -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --log-level debug"]
+# Expose the port Railway expects
+EXPOSE $PORT
+
+# Start command that works with Railway
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT
