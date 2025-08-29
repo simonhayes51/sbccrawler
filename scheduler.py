@@ -1,7 +1,7 @@
 # scheduler.py
 import asyncio
 from datetime import datetime, time, timedelta
-import pytz
+import pytz  # container-friendly tz
 from crawler import crawl_all_sets
 from db import save_set, mark_all_inactive_before
 
@@ -16,14 +16,21 @@ async def run_job():
     success_count = 0
     for s in sets:
         try:
+            # Derive slug if missing
+            slug = s.get("slug")
+            if not slug:
+                url = s.get("url", "").rstrip("/")
+                parts = [p for p in url.split("/") if p]
+                slug = parts[-1] if parts else None
+
             await save_set(
-                slug=s.get("slug"),
+                slug=slug,
                 url=s.get("url"),
                 name=s.get("name"),
                 expires_at=s.get("expires_at"),
-                repeatable=s.get("repeatable"),
-                rewards=s.get("rewards"),
-                challenges=s.get("sub_challenges"),
+                repeatable=s.get("repeatable", False),
+                rewards=s.get("rewards", []),
+                challenges=s.get("sub_challenges", []),
             )
             success_count += 1
             print(f"💾 Saved {s.get('name')}")
@@ -52,4 +59,4 @@ async def schedule_loop():
             await run_job()
         except Exception as e:
             print(f"💥 Scheduled run failed: {e}")
-            await asyncio.sleep(300)  # backoff
+            await asyncio.sleep(300)  # backoff on error
