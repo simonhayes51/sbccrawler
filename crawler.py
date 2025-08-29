@@ -1,58 +1,53 @@
-# crawler.py
+# scheduler.py
+import asyncio
+from datetime import datetime, timezone, timedelta
+from db import upsert_set, mark_all_inactive_before
 
-import re
-from typing import Dict, Any, List, Optional
-from urllib.parse import urljoin
-from datetime import datetime, timezone
+RUN_AT_HOUR_UTC = 17  # daily schedule hour
 
-import httpx
-from bs4 import BeautifulSoup
-from normalizer import normalize_requirements
-
-HOME = "https://www.fut.gg"
-
-# More comprehensive SBC URL pattern
-SET_URL_RE = re.compile(r"^/sbc/(?:[^/]+/)?(?:\d{2}-\d{1,6}-|[a-zA-Z0-9-]+/?)")
-
-async def fetch_html(client: httpx.AsyncClient, url: str) -> str:
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "gzip, deflate",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Cache-Control": "max-age=0"
-    }
+async def run_job(debug_first: bool = False):
     try:
-        r = await client.get(url, timeout=30, follow_redirects=True, headers=headers)
-        r.raise_for_status()
-        return r.text
+        from crawler import crawl_all_sets   # lazy import here
     except Exception as e:
-        print(f"⚠️ Failed to fetch {url}: {e}")
-        raise
+        print(f"❌ scheduler: failed to import crawl_all_sets: {e}")
+        return
 
-def discover_set_links(list_html: str) -> List[str]:
-    soup = BeautifulSoup(list_html, "html.parser")
-    links: set[str] = set()
+    try:
+        print("🔄 scheduler: starting crawl…")
+        sets = await crawl_all_sets(debug_first=debug_first)
+        print(f"✅ scheduler: fetched {len(sets)} sets")
 
-    for a in soup.select("a[href]"):
-        href = a.get("href", "")
-        if not href:
-            continue
-        clean_href = href.split("#")[0].split("?")[0]
-        if (clean_href.startswith("/sbc/") and 
-            len(clean_href) > 5 and 
-            clean_href != "/sbc/" and
-            not clean_href.endswith("/sbc")):
-            full_url = urljoin(HOME, clean_href)
-            links.add(full_url)
+        cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        await mark_all_inactive_before(cutoff)
 
-    print(f"🔍 Discovered {len(links)} unique SBC links")
-    return sorted(links)
+        upserts = 0
+        for payload in sets:
+            try:
+                await upsert_set(payload)
+                upserts += 1
+            except Exception as e:
+                print(f"⚠️ scheduler: upsert failed for {payload.get('slug')}: {e}")
 
-# … and the rest of your functions the same, just replace every “ ” with " and """ for docstrings
+        print(f"✅ scheduler: upserted {upserts}/{len(sets)} sets")
+    except Exception as e:
+        print(f"💥 scheduler: run_job failed: {e}")
+
+async def _sleep_until_next_run(hour_utc: int):
+    while True:
+        now = datetime.now(timezone.utc)
+        next_run = now.replace(hour=hour_utc, minute=0, second=0, microsecond=0)
+        if next_run <= now:
+            next_run = next_run + timedelta(days=1)
+        await asyncio.sleep((next_run - now).total_seconds())
+        return
+
+async def schedule_loop():
+    print("🕒 scheduler: loop started")
+    try:
+        await run_job(debug_first=True)
+    except Exception as e:
+        print(f"⚠️ scheduler: initial run failed: {e}")
+
+    while True:
+        await _sleep_until_next_run(RUN_AT_HOUR_UTC)
+        await run_job(debug_first=False)
