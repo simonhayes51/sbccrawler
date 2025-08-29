@@ -1,117 +1,47 @@
 # db.py
-import os
 import asyncpg
-from typing import Any, Dict, Optional
-from datetime import datetime, timezone
+import os
+import json
 
-POOL: Optional[asyncpg.Pool] = None
+DATABASE_URL = os.getenv("DATABASE_URL")
+_pool = None
 
-async def get_pool() -> asyncpg.Pool:
-    global POOL
-    if POOL is None:
-        url = os.getenv("DATABASE_URL")
-        if not url:
-            raise RuntimeError("DATABASE_URL not set")
-        try:
-            POOL = await asyncpg.create_pool(url, min_size=1, max_size=5)
-        except Exception as e:
-            raise RuntimeError(f"Failed to connect to Postgres: {e}")
-    return POOL
+async def get_pool():
+    global _pool
+    if not _pool:
+        _pool = await asyncpg.create_pool(DATABASE_URL)
+    return _pool
 
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS sbc_sets (
-  id BIGSERIAL PRIMARY KEY,
-  slug TEXT UNIQUE NOT NULL,
-  name TEXT,
-  repeatable_text TEXT,
-  expires_at TIMESTAMPTZ,
-  site_cost INTEGER,
-  reward_summary TEXT,
-  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  is_active BOOLEAN NOT NULL DEFAULT TRUE
-);
-CREATE TABLE IF NOT EXISTS sbc_challenges (
-  id BIGSERIAL PRIMARY KEY,
-  sbc_set_id BIGINT REFERENCES sbc_sets(id) ON DELETE CASCADE,
-  name TEXT,
-  site_cost INTEGER,
-  reward_text TEXT,
-  order_index INTEGER,
-  UNIQUE (sbc_set_id, name)
-);
-CREATE TABLE IF NOT EXISTS sbc_requirements (
-  id BIGSERIAL PRIMARY KEY,
-  challenge_id BIGINT REFERENCES sbc_challenges(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL,
-  key TEXT,
-  op TEXT,
-  value TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_sets_active ON sbc_sets(is_active);
-CREATE INDEX IF NOT EXISTS idx_sets_slug ON sbc_sets(slug);
-"""
-
-async def init_db():
-    pool = await get_pool()
-    async with pool.acquire() as con:
-        await con.execute(SCHEMA_SQL)
-
-async def mark_all_inactive_before(ts: datetime):
+async def save_set(slug, url, name, expires_at, repeatable, rewards, challenges):
     pool = await get_pool()
     async with pool.acquire() as con:
         await con.execute(
-            "UPDATE sbc_sets SET is_active = FALSE WHERE last_seen_at < $1",
-            ts
+            """
+            INSERT INTO sbc_sets (slug, url, name, expires_at, repeatable, rewards, challenges, active)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,true)
+            ON CONFLICT (slug) DO UPDATE SET
+                url=EXCLUDED.url,
+                name=EXCLUDED.name,
+                expires_at=EXCLUDED.expires_at,
+                repeatable=EXCLUDED.repeatable,
+                rewards=EXCLUDED.rewards,
+                challenges=EXCLUDED.challenges,
+                active=true
+            """,
+            slug, url, name, expires_at, repeatable,
+            json.dumps(rewards), json.dumps(challenges)
         )
 
-async def upsert_set(payload: Dict[str, Any]) -> int:
+async def mark_all_inactive_before(timestamp):
     pool = await get_pool()
-    rewards_text = ", ".join([r.get("label") or r.get("reward") or r.get("type","") for r in payload.get("rewards", [])]) or None
-    now = datetime.now(timezone.utc)
     async with pool.acquire() as con:
-        set_id = await con.fetchval(
-            """
-            INSERT INTO sbc_sets (slug,name,repeatable_text,expires_at,site_cost,reward_summary,last_seen_at,is_active)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE)
-            ON CONFLICT (slug) DO UPDATE SET
-              name=EXCLUDED.name,
-              repeatable_text=EXCLUDED.repeatable_text,
-              expires_at=EXCLUDED.expires_at,
-              site_cost=EXCLUDED.site_cost,
-              reward_summary=EXCLUDED.reward_summary,
-              last_seen_at=EXCLUDED.last_seen_at,
-              is_active=TRUE
-            RETURNING id
-            """,
-            payload["slug"],
-            payload.get("name"),
-            payload.get("repeatable"),
-            payload.get("expires_at"),
-            payload.get("cost"),
-            rewards_text,
-            now
+        await con.execute(
+            "UPDATE sbc_sets SET active=false WHERE updated_at < $1",
+            timestamp,
         )
-        for idx, ch in enumerate(payload.get("sub_challenges", [])):
-            ch_id = await con.fetchval(
-                """
-                INSERT INTO sbc_challenges (sbc_set_id,name,site_cost,reward_text,order_index)
-                VALUES ($1,$2,$3,$4,$5)
-                ON CONFLICT (sbc_set_id,name) DO UPDATE SET
-                  site_cost=EXCLUDED.site_cost,
-                  reward_text=EXCLUDED.reward_text,
-                  order_index=EXCLUDED.order_index
-                RETURNING id
-                """,
-                set_id, ch.get("name"), ch.get("cost"), ch.get("reward"), idx
-            )
-            await con.execute("DELETE FROM sbc_requirements WHERE challenge_id=$1", ch_id)
-            for req in ch.get("requirements", []):
-                await con.execute(
-                    "INSERT INTO sbc_requirements (challenge_id,kind,key,op,value) VALUES ($1,$2,$3,$4,$5)",
-                    ch_id,
-                    req.get("kind","raw"),
-                    req.get("key"),
-                    req.get("op"),
-                    str(req.get("value") if req.get("value") is not None else req.get("text"))
-                )
-    return set_id
+
+async def get_all_sets():
+    pool = await get_pool()
+    async with pool.acquire() as con:
+        rows = await con.fetch("SELECT * FROM sbc_sets WHERE active=true ORDER BY name")
+        return [dict(r) for r in rows]
