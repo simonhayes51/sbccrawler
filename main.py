@@ -1,4 +1,8 @@
-# main.py
+@app.get("/api/players/prices")
+async def get_player_prices(
+    min_rating: int = Query(75, description="Minimum player rating"),
+    max_rating: int = Query(95, description="Maximum player rating"),
+    position: Optional[str]# main.py
 import os, asyncio, traceback
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Query
@@ -6,6 +10,7 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from db import init_db, get_pool
 from scheduler import run_job, schedule_loop
+from price_fetcher import solve_sbc_challenge, price_update_loop
 
 app = FastAPI(title="FUT SBC Tracker", description="FIFA Ultimate Team Squad Building Challenge tracker and solver")
 
@@ -32,6 +37,8 @@ async def on_startup():
         asyncio.create_task(_initial_run())
         # Start the daily 18:00 UK scheduler
         asyncio.create_task(schedule_loop())
+        # Start price update loop
+        asyncio.create_task(price_update_loop())
         print("✅ App bootstrapped; background tasks scheduled")
     except Exception as e:
         status["startup_error"] = f"{type(e).__name__}: {e}"
@@ -266,7 +273,6 @@ async def get_categories():
 
 async def calculate_cheapest_solution(challenge_id: int) -> Dict[str, Any]:
     """Calculate the cheapest solution for a challenge based on requirements"""
-    # This is a simplified version - in production you'd want more sophisticated logic
     pool = await get_pool()
     async with pool.acquire() as con:
         # Get challenge requirements
@@ -276,31 +282,65 @@ async def calculate_cheapest_solution(challenge_id: int) -> Dict[str, Any]:
             WHERE challenge_id = $1
         """, challenge_id)
         
-        # For now, return a mock solution
-        # In production, you'd integrate with FUT market API or maintain player price database
-        solution = {
-            "total_cost": 15000,  # Mock cost
-            "players": [
-                {"name": "Generic 83 Rated Player", "position": "ST", "price": 5000, "rating": 83},
-                {"name": "Generic 82 Rated Player", "position": "CM", "price": 3000, "rating": 82},
-                # Add more mock players based on requirements
-            ],
-            "chemistry": 100,
-            "rating": 84,
-            "meets_requirements": True,
-            "requirements_analysis": [
-                {
-                    "requirement": req["value"] if req["value"] else f"{req['kind']}: {req['key']}",
-                    "satisfied": True,
-                    "notes": "Using cheapest available players"
-                }
-                for req in requirements
-            ]
-        }
+        # Convert to format expected by solver
+        req_list = []
+        for req in requirements:
+            req_dict = {
+                "kind": req["kind"],
+                "key": req["key"],
+                "op": req["op"], 
+                "value": req["value"]
+            }
+            req_list.append(req_dict)
         
-        return solution
+        # Use the price system to solve
+        solution = await solve_sbc_challenge(req_list)
+@app.get("/api/players/prices")
+async def get_player_prices(
+    min_rating: int = Query(75, description="Minimum player rating"),
+    max_rating: int = Query(95, description="Maximum player rating"),
+    position: Optional[str] = Query(None, description="Filter by position"),
+    league: Optional[str] = Query(None, description="Filter by league"),
+    limit: int = Query(50, description="Maximum number of players to return")
+):
+    """Get current player prices for building squads"""
+    try:
+        from price_fetcher import price_db
+        
+        # Get players within rating range
+        players = price_db.get_players_by_rating(min_rating, max_rating)
+        
+        # Apply additional filters
+        if position:
+            players = [p for p in players if p.position.lower() == position.lower()]
+        
+        if league:
+            players = [p for p in players if league.lower() in p.league.lower()]
+        
+        # Limit results
+        players = players[:limit]
+        
+        return {
+            "players": [
+                {
+                    "name": p.name,
+                    "rating": p.rating,
+                    "position": p.position,
+                    "league": p.league,
+                    "club": p.club,
+                    "nation": p.nation,
+                    "price": p.price,
+                    "rarity": p.rarity
+                }
+                for p in players
+            ],
+            "total_found": len(players),
+            "last_updated": price_db.last_update.isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Failed to get player prices: {e}")
 
-@app.get("/api/challenges/{challenge_id}/solution")
+# ==================== WEB UI ====================
 async def get_challenge_solution(challenge_id: int):
     """Get cheapest solution for a specific challenge"""
     try:
@@ -764,11 +804,39 @@ async def sbc_browser():
                                                 <div style="font-weight: 700; color: #27ae60; margin-bottom: 10px;">
                                                     💰 Estimated Cost: {{ formatCost(solutions[challenge.id].total_cost) }}
                                                 </div>
-                                                <div style="font-size: 0.9em; color: #7f8c8d;">
+                                                <div style="font-size: 0.9em; color: #7f8c8d; margin-bottom: 15px;">
                                                     <p>⚡ Chemistry: {{ solutions[challenge.id].chemistry }}</p>
-                                                    <p>⭐ Rating: {{ solutions[challenge.id].rating }}</p>
-                                                    <p style="margin-top: 5px;"><em>Note: This is a simplified calculation. Actual market prices may vary.</em></p>
+                                                    <p>⭐ Team Rating: {{ solutions[challenge.id].rating }}</p>
+                                                    <p>👥 Players: {{ solutions[challenge.id].players.length }}</p>
                                                 </div>
+                                                
+                                                <!-- Player List -->
+                                                <div style="max-height: 200px; overflow-y: auto; background: #f8f9fa; border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                                                    <div style="font-weight: 600; margin-bottom: 8px; color: #2c3e50;">Squad:</div>
+                                                    <div v-for="player in solutions[challenge.id].players" :key="player.name" 
+                                                         style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid #e0e0e0;">
+                                                        <span style="font-size: 0.85em;">
+                                                            <strong>{{ player.name }}</strong> ({{ player.position }}) - {{ player.rating }} OVR
+                                                        </span>
+                                                        <span style="color: #27ae60; font-weight: 600; font-size: 0.85em;">
+                                                            {{ formatCost(player.price) }}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <!-- Requirements Check -->
+                                                <div style="background: #e8f5e8; border-radius: 6px; padding: 8px; font-size: 0.8em;">
+                                                    <div style="font-weight: 600; color: #27ae60; margin-bottom: 5px;">Requirements Check:</div>
+                                                    <div v-for="req in solutions[challenge.id].requirements_analysis" :key="req.requirement">
+                                                        <span :style="req.satisfied ? 'color: #27ae60;' : 'color: #e74c3c;'">
+                                                            {{ req.satisfied ? '✅' : '❌' }} {{ req.requirement }}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <p style="font-size: 0.75em; color: #95a5a6; margin-top: 8px; font-style: italic;">
+                                                    💡 Prices are estimates and may vary based on current market conditions.
+                                                </p>
                                             </div>
                                         </div>
                                     </div>
@@ -795,3 +863,203 @@ async def sbc_browser():
                         selectedSbc: null,
                         loadingDetails: false,
                         solutions: {},
+                        loadingSolutions: {},
+                        searchTimeout: null
+                    }
+                },
+                computed: {
+                    filteredSbcs() {
+                        if (!this.searchQuery) return this.sbcs;
+                        const query = this.searchQuery.toLowerCase();
+                        return this.sbcs.filter(sbc => 
+                            sbc.name.toLowerCase().includes(query) ||
+                            (sbc.rewards && sbc.rewards.toLowerCase().includes(query))
+                        );
+                    }
+                },
+                async mounted() {
+                    await this.loadCategories();
+                    await this.loadSbcs();
+                },
+                methods: {
+                    async loadCategories() {
+                        try {
+                            const response = await axios.get('/api/categories');
+                            this.categories = response.data.categories;
+                        } catch (error) {
+                            console.error('Failed to load categories:', error);
+                        }
+                    },
+                    
+                    async loadSbcs() {
+                        this.loading = true;
+                        try {
+                            const params = {
+                                active_only: this.activeOnly,
+                                limit: 100
+                            };
+                            if (this.selectedCategory) {
+                                params.category = this.selectedCategory;
+                            }
+                            
+                            const response = await axios.get('/api/sbcs', { params });
+                            this.sbcs = response.data.sbcs;
+                        } catch (error) {
+                            console.error('Failed to load SBCs:', error);
+                        } finally {
+                            this.loading = false;
+                        }
+                    },
+                    
+                    async openSbc(sbcId) {
+                        this.loadingDetails = true;
+                        this.selectedSbc = { name: 'Loading...' };
+                        
+                        try {
+                            const response = await axios.get(`/api/sbcs/${sbcId}`);
+                            this.selectedSbc = response.data.sbc;
+                            this.selectedSbc.challenges = response.data.challenges;
+                        } catch (error) {
+                            console.error('Failed to load SBC details:', error);
+                            this.selectedSbc = null;
+                        } finally {
+                            this.loadingDetails = false;
+                        }
+                    },
+                    
+                    closeSbc() {
+                        this.selectedSbc = null;
+                        this.solutions = {};
+                        this.loadingSolutions = {};
+                    },
+                    
+                    async loadSolution(challengeId) {
+                        this.$set(this.loadingSolutions, challengeId, true);
+                        
+                        try {
+                            const response = await axios.get(`/api/challenges/${challengeId}/solution`);
+                            this.$set(this.solutions, challengeId, response.data.solution);
+                        } catch (error) {
+                            console.error('Failed to load solution:', error);
+                        } finally {
+                            this.$set(this.loadingSolutions, challengeId, false);
+                        }
+                    },
+                    
+                    debounceSearch() {
+                        clearTimeout(this.searchTimeout);
+                        this.searchTimeout = setTimeout(() => {
+                            // Search is handled by computed property
+                        }, 300);
+                    },
+                    
+                    formatDate(dateString) {
+                        if (!dateString) return 'No date';
+                        return new Date(dateString).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric'
+                        });
+                    },
+                    
+                    formatCost(cost) {
+                        if (!cost || cost === 0) return 'Free';
+                        if (cost >= 1000000) return `${(cost / 1000000).toFixed(1)}M`;
+                        if (cost >= 1000) return `${(cost / 1000).toFixed(0)}K`;
+                        return cost.toString();
+                    },
+                    
+                    formatRequirement(req) {
+                        if (req.kind === 'team_rating_min') {
+                            return `Min. Team Rating: ${req.value}`;
+                        } else if (req.kind === 'chem_min') {
+                            return `Min. Chemistry: ${req.value}`;
+                        } else if (req.kind === 'min_from') {
+                            return `Min. ${req.value} Players from: ${req.key}`;
+                        } else if (req.kind === 'count_constraint') {
+                            const op = req.operator === 'eq' ? 'Exactly' : req.operator === 'le' ? 'Max.' : 'Min.';
+                            return `${op} ${req.value} ${req.key}`;
+                        } else if (req.kind === 'min_program') {
+                            return `Min. ${req.value} Special Players`;
+                        } else if (req.kind === 'raw') {
+                            return req.value;
+                        } else {
+                            return `${req.kind}: ${req.value || req.key || 'Unknown'}`;
+                        }
+                    }
+                }
+            }).mount('#app');
+        </script>
+    </body>
+    </html>
+    """)
+
+# ==================== DEBUG ENDPOINTS (keep existing ones) ====================
+
+@app.get("/debug-single/{path:path}")
+async def debug_single_sbc(path: str):
+    """Debug a single SBC page to understand its structure"""
+    if not path.startswith("sbc/"):
+        raise HTTPException(400, "Path must start with 'sbc/'")
+    
+    from crawler import fetch_html, parse_set_page
+    import httpx
+    
+    url = f"https://www.fut.gg/{path}"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            html = await fetch_html(client, url)
+            parsed = parse_set_page(html, url, debug=True)
+            
+            return {
+                "url": url,
+                "parsed": parsed,
+                "html_preview": html[:500] + "..." if len(html) > 500 else html
+            }
+    except Exception as e:
+        raise HTTPException(500, f"Failed to debug SBC: {e}")
+
+@app.get("/test-crawl")
+async def test_crawl():
+    """Test crawl with detailed output for debugging"""
+    from crawler import crawl_all_sets
+    
+    try:
+        sets = await crawl_all_sets(debug_first=True)
+        
+        return {
+            "total_count": len(sets),
+            "sets_with_challenges": len([s for s in sets if s["sub_challenges"]]),
+            "sample_sets": sets[:3],
+            "challenge_counts": [len(s["sub_challenges"]) for s in sets],
+            "summary": {
+                "avg_challenges_per_set": sum(len(s["sub_challenges"]) for s in sets) / len(sets) if sets else 0,
+                "max_challenges": max(len(s["sub_challenges"]) for s in sets) if sets else 0,
+                "empty_sets": len([s for s in sets if not s["sub_challenges"]])
+            }
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Test crawl failed: {e}")
+
+@app.get("/raw-html/{path:path}")
+async def get_raw_html(path: str):
+    """Get raw HTML from a fut.gg page for inspection"""
+    if not path.startswith("sbc/"):
+        raise HTTPException(400, "Path must start with 'sbc/'")
+    
+    from crawler import fetch_html
+    import httpx
+    
+    url = f"https://www.fut.gg/{path}"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            html = await fetch_html(client, url)
+            return JSONResponse({
+                "url": url,
+                "html": html,
+                "length": len(html)
+            })
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch HTML: {e}")
