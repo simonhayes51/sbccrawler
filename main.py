@@ -8,8 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from scheduler import schedule_loop, run_job
-from db import get_all_sets
-
+from db import init_db, get_all_sets
 try:
     from db import get_set_by_slug  # optional
 except Exception:
@@ -19,7 +18,7 @@ app = FastAPI(title="SBC Crawler API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],    # tighten later if needed
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,54 +33,42 @@ HEALTH = {
 }
 
 UI_HTML = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>SBC Crawler</title>
 <style>
-  :root { --bg:#0b0b0f; --card:#151521; --text:#e7e7ee; --muted:#9aa0a6; --accent:#00ff80; }
-  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
-  header{padding:16px 20px;border-bottom:1px solid #222}
-  h1{margin:0;font-size:18px}
-  .container{max-width:1100px;margin:24px auto;padding:0 16px}
-  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:16px}
-  button{background:var(--accent);color:#000;border:0;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
-  button:disabled{opacity:.6;cursor:default}
-  .status{color:var(--muted);font-size:12px;margin-left:auto}
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
-  .card{background:var(--card);border:1px solid #26263a;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
-  .name{font-weight:700}
-  .meta{color:var(--muted);font-size:12px}
-  .pill{display:inline-block;background:#1f1f2e;color:var(--muted);padding:3px 8px;border-radius:999px;font-size:12px;margin-right:6px}
-  .empty{color:var(--muted);text-align:center;padding:40px 0;border:1px dashed #2a2a3d;border-radius:14px}
-  a{color:var(--accent);text-decoration:none}
-  .list{margin-top:8px}
-  .req{color:#cfd3ff;font-size:12px;margin:2px 0}
+:root { --bg:#0b0b0f; --card:#151521; --text:#e7e7ee; --muted:#9aa0a6; --accent:#00ff80; }
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+header{padding:16px 20px;border-bottom:1px solid #222} h1{margin:0;font-size:18px}
+.container{max-width:1100px;margin:24px auto;padding:0 16px}
+.toolbar{display:flex;gap:10px;align-items:center;margin-bottom:16px}
+button{background:var(--accent);color:#000;border:0;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
+button:disabled{opacity:.6;cursor:default}
+.status{color:var(--muted);font-size:12px;margin-left:auto}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid #26263a;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.name{font-weight:700}
+.meta{color:var(--muted);font-size:12px}
+.pill{display:inline-block;background:#1f1f2e;color:var(--muted);padding:3px 8px;border-radius:999px;font-size:12px;margin-right:6px}
+.empty{color:var(--muted);text-align:center;padding:40px 0;border:1px dashed #2a2a3d;border-radius:14px}
+a{color:var(--accent);text-decoration:none}
+.list{margin-top:8px}
+.req{color:#cfd3ff;font-size:12px;margin:2px 0}
 </style>
-</head>
-<body>
-  <header>
-    <h1>🧩 SBC Crawler</h1>
-  </header>
-  <div class="container">
-    <div class="toolbar">
-      <button id="crawlBtn">Run Crawl Now</button>
-      <div class="status" id="status">Loading…</div>
-    </div>
-    <div id="content"></div>
+</head><body>
+<header><h1>🧩 SBC Crawler</h1></header>
+<div class="container">
+  <div class="toolbar">
+    <button id="crawlBtn">Run Crawl Now</button>
+    <div class="status" id="status">Loading…</div>
   </div>
-
+  <div id="content"></div>
+</div>
 <script>
 async function getJSON(url, opts={}) {
   const r = await fetch(url, opts);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
-}
-function fmtDate(s) {
-  if (!s) return "—";
-  const d = new Date(s);
-  return d.toLocaleString();
 }
 function el(tag, attrs={}, ...children) {
   const e = document.createElement(tag);
@@ -93,7 +80,6 @@ function el(tag, attrs={}, ...children) {
   for (const c of children) e.append(c instanceof Node ? c : document.createTextNode(c));
   return e;
 }
-
 async function load() {
   const status = document.getElementById("status");
   const content = document.getElementById("content");
@@ -103,34 +89,25 @@ async function load() {
     const health = await getJSON("/api/health");
     const data = await getJSON("/api/sbcs");
     status.textContent = `ready: ${health.ready} | last_run: ${health.last_run || "—"}`;
-
     if (!data.count) {
       content.append(el("div",{class:"empty"},"No SBCs found yet. Click “Run Crawl Now”."));
       return;
     }
     const grid = el("div",{class:"grid"});
     for (const row of data.sets) {
+      const chCount = Array.isArray(row.challenges) ? row.challenges.length : 0;
       const card = el("div",{class:"card"},
         el("div",{class:"name"}, row.name || "Untitled"),
         el("div",{class:"meta"},
           el("span",{class:"pill"}, row.repeatable ? "Repeatable" : "One-time"),
           el("span",{class:"pill"}, row.expires_at ? ("Expires " + new Date(row.expires_at).toLocaleDateString()) : "No expiry")
         ),
-        row.url ? el("a",{href:row.url,target:"_blank",rel:"noopener"}, "Open on FUT.GG →") : el("div"),
-        el("div",{class:"meta"},"Challenges: " + (Array.isArray(row.challenges)? row.challenges.length : 0)),
-        (() => {
-          const list = el("div",{class:"list"});
-          try {
-            const chals = Array.isArray(row.challenges) ? row.challenges.slice(0,3) : [];
-            chals.forEach(ch => {
-              const title = (ch && ch.name) ? ch.name : "Challenge";
-              list.append(
-                el("div",{class:"req"}, "— " + title + (Array.isArray(ch.requirements) ? ` (${ch.requirements.length} reqs)` : ""))
-              );
-            });
-          } catch {}
-          return list;
-        })()
+        row.url ? el("a",{href:row.url,target:"_blank",rel:"noopener"},"Open on FUT.GG →") : el("div"),
+        el("div",{class:"meta"},"Challenges: " + chCount),
+        (()=>{const list=el("div",{class:"list"});try{
+          const ch=Array.isArray(row.challenges)?row.challenges.slice(0,3):[];
+          ch.forEach(c=>list.append(el("div",{class:"req"},"— "+(c?.name||"Challenge")+" ("+(Array.isArray(c?.requirements)?c.requirements.length:0)+" reqs)")));
+        }catch{} return list;})()
       );
       grid.append(card);
     }
@@ -140,31 +117,23 @@ async function load() {
     content.append(el("div",{class:"empty"},"Failed to load data: " + e.message));
   }
 }
-
 document.getElementById("crawlBtn").addEventListener("click", async (e) => {
   const btn = e.currentTarget;
   const status = document.getElementById("status");
   btn.disabled = true; status.textContent = "Crawling…";
-  try {
-    const r = await getJSON("/api/debug/trigger-crawl", {method:"POST"});
-    status.textContent = "Crawl done. Refreshing…";
-    await load();
-  } catch (e2) {
-    status.textContent = "Crawl failed: " + e2.message;
-  } finally {
-    btn.disabled = false;
-  }
+  try { await getJSON("/api/debug/trigger-crawl",{method:"POST"}); await load(); }
+  catch(e2){ status.textContent="Crawl failed: "+e2.message; }
+  finally{ btn.disabled=false; }
 });
-
 load();
 </script>
-</body>
-</html>
+</body></html>
 """
 
 @app.on_event("startup")
 async def on_startup():
     try:
+        await init_db()
         async def initial():
             try:
                 HEALTH["last_run"] = "startup"
@@ -223,10 +192,4 @@ async def get_sbc(slug: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", "8080")),
-        log_level="info",
-        reload=False,
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8080")), log_level="info", reload=False)
