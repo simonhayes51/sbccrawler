@@ -1,208 +1,232 @@
-# crawler.py
-import re
-from typing import Dict, Any, List, Set, Tuple
-from urllib.parse import urljoin
+# main.py
+import os
+import asyncio
 from datetime import datetime, timezone
 
-import httpx
-from bs4 import BeautifulSoup
-from normalizer import normalize_requirements
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
-HOME = "https://www.fut.gg"
-CATEGORY_PATH_RE = re.compile(r"/sbc/category/")
+from scheduler import schedule_loop, run_job
+from db import get_all_sets
 
-REQ_LINE_RE = re.compile(
-    r"\b(Min\.|Max\.|Exactly|Players?\s+from|Overall|Team\s+Rating|Squad\s+Total\s+Chemistry|Chemistry|Club|Nation|League|Rare|Gold|Silver|Bronze|Common)\b",
-    re.I,
+try:
+    from db import get_set_by_slug  # optional
+except Exception:
+    get_set_by_slug = None
+
+app = FastAPI(title="SBC Crawler API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-def _text(el) -> str:
-    if el is None:
-        return ""
-    if isinstance(el, dict):
-        return el.get("text", "")
+HEALTH = {
+    "status": "ok",
+    "ready": False,
+    "last_run": None,
+    "startup_error": None,
+    "database_configured": bool(os.getenv("DATABASE_URL")),
+}
+
+UI_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SBC Crawler</title>
+<style>
+  :root { --bg:#0b0b0f; --card:#151521; --text:#e7e7ee; --muted:#9aa0a6; --accent:#00ff80; }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+  header{padding:16px 20px;border-bottom:1px solid #222}
+  h1{margin:0;font-size:18px}
+  .container{max-width:1100px;margin:24px auto;padding:0 16px}
+  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:16px}
+  button{background:var(--accent);color:#000;border:0;padding:10px 14px;border-radius:10px;font-weight:700;cursor:pointer}
+  button:disabled{opacity:.6;cursor:default}
+  .status{color:var(--muted);font-size:12px;margin-left:auto}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+  .card{background:var(--card);border:1px solid #26263a;border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:8px}
+  .name{font-weight:700}
+  .meta{color:var(--muted);font-size:12px}
+  .pill{display:inline-block;background:#1f1f2e;color:var(--muted);padding:3px 8px;border-radius:999px;font-size:12px;margin-right:6px}
+  .empty{color:var(--muted);text-align:center;padding:40px 0;border:1px dashed #2a2a3d;border-radius:14px}
+  a{color:var(--accent);text-decoration:none}
+  .list{margin-top:8px}
+  .req{color:#cfd3ff;font-size:12px;margin:2px 0}
+</style>
+</head>
+<body>
+  <header>
+    <h1>🧩 SBC Crawler</h1>
+  </header>
+  <div class="container">
+    <div class="toolbar">
+      <button id="crawlBtn">Run Crawl Now</button>
+      <div class="status" id="status">Loading…</div>
+    </div>
+    <div id="content"></div>
+  </div>
+
+<script>
+async function getJSON(url, opts={}) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+function fmtDate(s) {
+  if (!s) return "—";
+  const d = new Date(s);
+  return d.toLocaleString();
+}
+function el(tag, attrs={}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k,v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on") && typeof v === "function") e.addEventListener(k.slice(2).toLowerCase(), v);
+    else e.setAttribute(k, v);
+  }
+  for (const c of children) e.append(c instanceof Node ? c : document.createTextNode(c));
+  return e;
+}
+
+async function load() {
+  const status = document.getElementById("status");
+  const content = document.getElementById("content");
+  content.innerHTML = "";
+  status.textContent = "Loading…";
+  try {
+    const health = await getJSON("/api/health");
+    const data = await getJSON("/api/sbcs");
+    status.textContent = `ready: ${health.ready} | last_run: ${health.last_run || "—"}`;
+
+    if (!data.count) {
+      content.append(el("div",{class:"empty"},"No SBCs found yet. Click “Run Crawl Now”."));
+      return;
+    }
+    const grid = el("div",{class:"grid"});
+    for (const row of data.sets) {
+      const card = el("div",{class:"card"},
+        el("div",{class:"name"}, row.name || "Untitled"),
+        el("div",{class:"meta"},
+          el("span",{class:"pill"}, row.repeatable ? "Repeatable" : "One-time"),
+          el("span",{class:"pill"}, row.expires_at ? ("Expires " + new Date(row.expires_at).toLocaleDateString()) : "No expiry")
+        ),
+        row.url ? el("a",{href:row.url,target:"_blank",rel:"noopener"}, "Open on FUT.GG →") : el("div"),
+        el("div",{class:"meta"},"Challenges: " + (Array.isArray(row.challenges)? row.challenges.length : 0)),
+        (() => {
+          const list = el("div",{class:"list"});
+          try {
+            const chals = Array.isArray(row.challenges) ? row.challenges.slice(0,3) : [];
+            chals.forEach(ch => {
+              const title = (ch && ch.name) ? ch.name : "Challenge";
+              list.append(
+                el("div",{class:"req"}, "— " + title + (Array.isArray(ch.requirements) ? ` (${ch.requirements.length} reqs)` : ""))
+              );
+            });
+          } catch {}
+          return list;
+        })()
+      );
+      grid.append(card);
+    }
+    content.append(grid);
+  } catch (e) {
+    status.textContent = "Error loading data";
+    content.append(el("div",{class:"empty"},"Failed to load data: " + e.message));
+  }
+}
+
+document.getElementById("crawlBtn").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  const status = document.getElementById("status");
+  btn.disabled = true; status.textContent = "Crawling…";
+  try {
+    const r = await getJSON("/api/debug/trigger-crawl", {method:"POST"});
+    status.textContent = "Crawl done. Refreshing…";
+    await load();
+  } catch (e2) {
+    status.textContent = "Crawl failed: " + e2.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+load();
+</script>
+</body>
+</html>
+"""
+
+@app.on_event("startup")
+async def on_startup():
     try:
-        return el.get_text(strip=True)
-    except Exception:
-        return str(el).strip()
-
-async def fetch_html(client: httpx.AsyncClient, url: str) -> str:
-    r = await client.get(url, timeout=20)
-    r.raise_for_status()
-    return r.text
-
-def discover_set_links(html: str) -> List[str]:
-    soup = BeautifulSoup(html, "html.parser")
-    links: Set[str] = set()
-    for a in soup.find_all("a", href=True):
-        clean = a["href"].split("#")[0].split("?")[0]
-        if not clean.startswith("/sbc/"):
-            continue
-        if CATEGORY_PATH_RE.search(clean):
-            continue
-        if clean == "/sbc/":
-            continue
-        parts = [p for p in clean.split("/") if p]
-        if len(parts) >= 2:
-            links.add(urljoin(HOME, clean))
-    return sorted(links)
-
-def _parse_rewards(container: BeautifulSoup) -> List[Dict[str, Any]]:
-    rewards: List[Dict[str, Any]] = []
-    for sel in [
-        ".squad-challenge-card__reward",
-        ".challenge-reward",
-        ".sbc-reward",
-        ".reward",
-    ]:
-        for node in container.select(sel):
-            txt = _text(node)
-            if txt:
-                rewards.append({"label": txt})
-
-    # de-dupe
-    seen, out = set(), []
-    for r in rewards:
-        if r["label"] not in seen:
-            seen.add(r["label"])
-            out.append(r)
-    return out
-
-def _normalize_req_texts(texts: List[str]) -> List[Dict[str, Any]]:
-    """Pass normalize_requirements a list of strings, not dicts."""
-    cleaned = []
-    seen = set()
-    for t in texts:
-        tt = (t or "").strip()
-        if not tt:
-            continue
-        if tt in seen:
-            continue
-        seen.add(tt)
-        cleaned.append(tt)
-    return normalize_requirements(cleaned)
-
-def _gather_requirements(container: BeautifulSoup) -> List[Dict[str, Any]]:
-    for sel in [
-        ".squad-challenge-card__requirements li",
-        ".challenge-requirements li",
-        ".sbc-requirements li",
-        ".requirements li",
-        ".requirements .item",
-        ".sbc__requirements li",
-    ]:
-        nodes = container.select(sel)
-        if nodes:
-            return _normalize_req_texts([_text(n) for n in nodes])
-
-    li_texts = []
-    for li in container.select("li"):
-        t = _text(li)
-        if t and REQ_LINE_RE.search(t):
-            li_texts.append(t)
-    if li_texts:
-        return _normalize_req_texts(li_texts)
-
-    p_texts = []
-    for p in container.select("p"):
-        t = _text(p)
-        if t and REQ_LINE_RE.search(t):
-            for line in re.split(r"[\n•]+", t):
-                line = line.strip(" -\u2022\t\r\n")
-                if line and REQ_LINE_RE.search(line):
-                    p_texts.append(line)
-    if p_texts:
-        return _normalize_req_texts(p_texts)
-
-    return []
-
-def parse_set_page(html: str) -> Dict[str, Any]:
-    soup = BeautifulSoup(html, "html.parser")
-
-    title = (
-        _text(soup.select_one("h1"))
-        or _text(soup.select_one(".page-title"))
-        or _text(soup.select_one('[data-testid="sbc-title"]'))
-        or "Unknown SBC"
-    )
-
-    candidates: List[Tuple[BeautifulSoup, str, str]] = []
-    for div in soup.select(".squad-challenge-card"):
-        t = _text(div.select_one(".squad-challenge-card__title")) or "Challenge"
-        reward_text = _text(div.select_one(".squad-challenge-card__reward"))
-        candidates.append((div, t, reward_text))
-
-    if not candidates:
-        h2 = soup.select_one("h2")
-        ch_title = _text(h2) or title
-        candidates = [(soup, ch_title, "")]
-
-    sub_challenges: List[Dict[str, Any]] = []
-    seen_titles: Set[str] = set()
-    seen_sigs: Set[str] = set()
-
-    for container, ch_title, reward_text in candidates:
-        normalized = _gather_requirements(container)
-        if not normalized and container is soup:
-            all_li = [li for li in soup.select("li") if REQ_LINE_RE.search(_text(li))]
-            if all_li:
-                normalized = _normalize_req_texts([_text(li) for li in all_li])
-
-        sig = "|".join(
-            f"{r.get('kind')}:{r.get('key') or ''}:{r.get('op') or ''}:{r.get('value') or r.get('text') or ''}"
-            for r in normalized
-        )
-
-        if not normalized:
-            continue
-        if ch_title in seen_titles or sig in seen_sigs:
-            continue
-
-        sub_challenges.append({
-            "name": ch_title,
-            "cost": 0,
-            "reward": reward_text,
-            "requirements": normalized,
-        })
-        seen_titles.add(ch_title)
-        seen_sigs.add(sig)
-
-    set_rewards = _parse_rewards(soup)
-    if not sub_challenges and not set_rewards:
-        return {}
-
-    return {"name": title, "rewards": set_rewards, "sub_challenges": sub_challenges}
-
-async def crawl_all_sets() -> List[Dict[str, Any]]:
-    results: List[Dict[str, Any]] = []
-    async with httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0 (crawler bot)"}) as client:
-        home_html = await fetch_html(client, urljoin(HOME, "/sbc"))
-        links = discover_set_links(home_html)
-
-        uniq_links, seen = [], set()
-        for l in links:
-            if l not in seen:
-                seen.add(l)
-                uniq_links.append(l)
-
-        print(f"🌐 Total SBC links to parse: {len(uniq_links)}")
-
-        parsed_ok, failed = 0, 0
-        for link in uniq_links:
+        async def initial():
             try:
-                html = await fetch_html(client, link)
-                parsed = parse_set_page(html)
-                if parsed.get("name") and (parsed.get("sub_challenges") or parsed.get("rewards")):
-                    parsed["url"] = link
-                    parsed["fetched_at"] = datetime.now(timezone.utc).isoformat()
-                    results.append(parsed)
-                    parsed_ok += 1
-                    print(f"✅ Parsed {parsed['name']} with {len(parsed['sub_challenges'])} challenges")
-                else:
-                    print(f"⚠️ Skipping empty/invalid set: {link}")
+                HEALTH["last_run"] = "startup"
+                await run_job()
+                HEALTH["ready"] = True
             except Exception as e:
-                failed += 1
-                print(f"💥 Failed to parse {link}: {e}")
+                HEALTH["startup_error"] = f"{type(e).__name__}: {e}"
+                HEALTH["status"] = "error"
+                HEALTH["ready"] = False
+        asyncio.create_task(initial())
+        asyncio.create_task(schedule_loop())
+    except Exception as e:
+        HEALTH["startup_error"] = f"{type(e).__name__}: {e}"
+        HEALTH["status"] = "error"
+        HEALTH["ready"] = False
 
-        print(f"✅ Parsed {parsed_ok} sets; failed {failed}")
-    return results
+@app.get("/", response_class=HTMLResponse)
+async def ui_root():
+    return HTMLResponse(content=UI_HTML)
+
+@app.get("/api/health")
+async def api_health():
+    return {
+        "status": HEALTH["status"],
+        "ready": HEALTH["ready"],
+        "last_run": HEALTH["last_run"],
+        "startup_error": HEALTH["startup_error"],
+        "database_configured": HEALTH["database_configured"],
+    }
+
+@app.post("/api/debug/trigger-crawl")
+async def trigger_crawl():
+    try:
+        await run_job()
+        HEALTH["last_run"] = datetime.now(timezone.utc).isoformat()
+        HEALTH["ready"] = True
+        return {"ok": True, "message": "Manual crawl completed"}
+    except Exception as e:
+        HEALTH["status"] = "error"
+        HEALTH["startup_error"] = f"{type(e).__name__}: {e}"
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/sbcs")
+async def list_sbcs():
+    sets = await get_all_sets()
+    return {"count": len(sets), "sets": sets}
+
+@app.get("/api/sbc/{slug}")
+async def get_sbc(slug: str):
+    if not callable(get_set_by_slug):
+        raise HTTPException(status_code=404, detail="Endpoint not available")
+    row = await get_set_by_slug(slug)
+    if not row:
+        raise HTTPException(status_code=404, detail="SBC not found")
+    return row
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8080")),
+        log_level="info",
+        reload=False,
+    )
