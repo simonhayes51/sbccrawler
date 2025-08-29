@@ -1,4 +1,4 @@
-# main.py - Full SBC Browser and Solution Calculator
+# main.py - Full SBC Browser and Solution Calculator 
 import os, asyncio, traceback
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Query
