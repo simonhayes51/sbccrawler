@@ -1,6 +1,7 @@
+# db.py
 import os
 import asyncpg
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 
 POOL: Optional[asyncpg.Pool] = None
@@ -8,7 +9,13 @@ POOL: Optional[asyncpg.Pool] = None
 async def get_pool() -> asyncpg.Pool:
     global POOL
     if POOL is None:
-        POOL = await asyncpg.create_pool(os.environ["DATABASE_URL"], min_size=1, max_size=5)
+        url = os.getenv("DATABASE_URL")
+        if not url:
+            raise RuntimeError("DATABASE_URL not set")
+        try:
+            POOL = await asyncpg.create_pool(url, min_size=1, max_size=5)
+        except Exception as e:
+            raise RuntimeError(f"Failed to connect to Postgres: {e}")
     return POOL
 
 SCHEMA_SQL = """
@@ -17,14 +24,12 @@ CREATE TABLE IF NOT EXISTS sbc_sets (
   slug TEXT UNIQUE NOT NULL,
   name TEXT,
   repeatable_text TEXT,
-  refresh_text TEXT,
   expires_at TIMESTAMPTZ,
   site_cost INTEGER,
   reward_summary TEXT,
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   is_active BOOLEAN NOT NULL DEFAULT TRUE
 );
-
 CREATE TABLE IF NOT EXISTS sbc_challenges (
   id BIGSERIAL PRIMARY KEY,
   sbc_set_id BIGINT REFERENCES sbc_sets(id) ON DELETE CASCADE,
@@ -34,7 +39,6 @@ CREATE TABLE IF NOT EXISTS sbc_challenges (
   order_index INTEGER,
   UNIQUE (sbc_set_id, name)
 );
-
 CREATE TABLE IF NOT EXISTS sbc_requirements (
   id BIGSERIAL PRIMARY KEY,
   challenge_id BIGINT REFERENCES sbc_challenges(id) ON DELETE CASCADE,
@@ -43,7 +47,6 @@ CREATE TABLE IF NOT EXISTS sbc_requirements (
   op TEXT,
   value TEXT
 );
-
 CREATE INDEX IF NOT EXISTS idx_sets_active ON sbc_sets(is_active);
 CREATE INDEX IF NOT EXISTS idx_sets_slug ON sbc_sets(slug);
 """
@@ -62,12 +65,6 @@ async def mark_all_inactive_before(ts: datetime):
         )
 
 async def upsert_set(payload: Dict[str, Any]) -> int:
-    """
-    payload: {
-      'slug','name','repeatable','expires_at','site_cost','rewards'(list text),
-      'sub_challenges': [ { 'name','site_cost','reward','requirements':[ dicts ] } ]
-    }
-    """
     pool = await get_pool()
     rewards_text = ", ".join([r.get("label") or r.get("reward") or r.get("type","") for r in payload.get("rewards", [])]) or None
     now = datetime.now(timezone.utc)
@@ -94,7 +91,6 @@ async def upsert_set(payload: Dict[str, Any]) -> int:
             rewards_text,
             now
         )
-        # challenges
         for idx, ch in enumerate(payload.get("sub_challenges", [])):
             ch_id = await con.fetchval(
                 """
@@ -108,7 +104,6 @@ async def upsert_set(payload: Dict[str, Any]) -> int:
                 """,
                 set_id, ch.get("name"), ch.get("cost"), ch.get("reward"), idx
             )
-            # replace requirements
             await con.execute("DELETE FROM sbc_requirements WHERE challenge_id=$1", ch_id)
             for req in ch.get("requirements", []):
                 await con.execute(
