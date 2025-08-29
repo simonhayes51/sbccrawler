@@ -1,69 +1,63 @@
-# main.py - Minimal version for debugging
-import os
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+#!/usr/bin/env python3
 
-app = FastAPI(title="FUT SBC Tracker - Debug Mode")
+# Ultra-minimal FastAPI app for Railway debugging
+import os
+import sys
+
+print("🚀 Python starting...")
+print(f"🐍 Python version: {sys.version}")
+print(f"📂 Working directory: {os.getcwd()}")
+print(f"🌐 PORT environment: {os.getenv('PORT', 'NOT SET')}")
+
+try:
+    from fastapi import FastAPI
+    print("✅ FastAPI imported successfully")
+except ImportError as e:
+    print(f"❌ FastAPI import failed: {e}")
+    sys.exit(1)
+
+try:
+    from fastapi.responses import JSONResponse
+    print("✅ FastAPI responses imported")
+except ImportError as e:
+    print(f"❌ FastAPI responses import failed: {e}")
+
+# Create the FastAPI app
+app = FastAPI(
+    title="Railway Debug App",
+    description="Testing Railway deployment",
+    version="1.0.0"
+)
+
+@app.get("/")
+async def root():
+    return {
+        "message": "🎉 FastAPI is working on Railway!",
+        "status": "success",
+        "port": os.getenv("PORT", "unknown"),
+        "python_version": sys.version,
+        "working_dir": os.getcwd()
+    }
 
 @app.get("/health")
 async def health():
+    return {"status": "healthy", "service": "railway-debug"}
+
+@app.get("/env")
+async def env_info():
     return {
-        "status": "ok", 
-        "port": os.getenv("PORT", "8080"),
-        "database_url_set": bool(os.getenv("DATABASE_URL")),
-        "message": "App is running!"
+        "PORT": os.getenv("PORT"),
+        "RAILWAY_ENVIRONMENT": os.getenv("RAILWAY_ENVIRONMENT"),
+        "DATABASE_URL_SET": bool(os.getenv("DATABASE_URL")),
+        "PWD": os.getenv("PWD"),
+        "HOME": os.getenv("HOME")
     }
 
-@app.get("/", response_class=HTMLResponse)
-async def root():
-    return HTMLResponse("""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>FUT SBC Tracker - Debug</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 40px; background: #f0f0f0; }
-            .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-            h1 { color: #2c3e50; text-align: center; }
-            .status { background: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0; }
-            .info { background: #f8f9fa; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 14px; }
-            a { color: #3498db; text-decoration: none; }
-            a:hover { text-decoration: underline; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🚀 FUT SBC Tracker</h1>
-            <div class="status">
-                <strong>✅ App is running successfully!</strong>
-            </div>
-            
-            <p>This is a minimal version to test Railway deployment.</p>
-            
-            <div class="info">
-                <strong>Environment:</strong><br>
-                PORT: """ + os.getenv("PORT", "8080") + """<br>
-                DATABASE_URL: """ + ("✅ Set" if os.getenv("DATABASE_URL") else "❌ Not set") + """
-            </div>
-            
-            <h3>Available Endpoints:</h3>
-            <ul>
-                <li><a href="/health">/health</a> - Health check</li>
-                <li><a href="/test">/test</a> - Simple test</li>
-            </ul>
-            
-            <p><em>Once this works, we can add back the full SBC functionality!</em></p>
-        </div>
-    </body>
-    </html>
-    """)
+print("✅ FastAPI app created successfully")
 
-@app.get("/test")
-async def test():
-    return {"message": "Test endpoint working!", "status": "success"}
-
+# For local testing
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8080))
-    print(f"🚀 Starting app on port {port}")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    print(f"🚀 Starting uvicorn on port {port}")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
