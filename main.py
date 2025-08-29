@@ -944,8 +944,14 @@ async def sbc_browser():
                                             @click="loadSolution(challenge.id)"
                                             :disabled="loadingSolutions[challenge.id]"
                                         >
-                                            {{ loadingSolutions[challenge.id] ? 'Calculating...' : 'Find Cheapest Solution' }}
+                                            {{ loadingSolutions[challenge.id] ? '⏳ Calculating...' : '💰 Find Cheapest Solution' }}
                                         </button>
+                                        
+                                        <!-- Error message for this specific challenge -->
+                                        <div v-if="solutionErrors[challenge.id]" style="margin-top: 10px; padding: 8px; background: #f8d7da; color: #721c24; border-radius: 4px; font-size: 0.9em;">
+                                            ❌ {{ solutionErrors[challenge.id] }}
+                                        </div>
+                                        
                                         <div v-if="solutions[challenge.id]" style="margin-top: 15px;">
                                             <div style="font-weight: 700; color: #27ae60; margin-bottom: 10px; font-size: 1.1em;">
                                                 💰 Total Cost: {{ formatCost(solutions[challenge.id].total_cost) }}
@@ -1000,6 +1006,7 @@ async def sbc_browser():
                     loadingDetails: false,
                     solutions: {},
                     loadingSolutions: {},
+                    solutionErrors: {},
                     searchTimeout: null,
                     dbReady: true,
                     error: null,
@@ -1112,22 +1119,51 @@ async def sbc_browser():
                     this.selectedSbc = null;
                     this.solutions = {};
                     this.loadingSolutions = {};
+                    this.solutionErrors = {};
                 },
                 
                 async loadSolution(challengeId) {
-                    if (!this.loadingSolutions) this.loadingSolutions = {};
-                    this.$set(this.loadingSolutions, challengeId, true);
+                    // Initialize reactive objects if they don't exist
+                    if (!this.loadingSolutions) {
+                        this.loadingSolutions = {};
+                    }
+                    if (!this.solutions) {
+                        this.solutions = {};
+                    }
+                    if (!this.solutionErrors) {
+                        this.solutionErrors = {};
+                    }
+                    
+                    // Clear any previous error for this challenge
+                    this.solutionErrors[challengeId] = null;
+                    
+                    // Set loading state
+                    this.loadingSolutions[challengeId] = true;
+                    this.$forceUpdate(); // Force Vue to update
                     
                     try {
+                        console.log('Loading solution for challenge:', challengeId);
                         const response = await axios.get(`/api/challenges/${challengeId}/solution`);
-                        if (!this.solutions) this.solutions = {};
-                        this.$set(this.solutions, challengeId, response.data.solution);
-                        console.log('Loaded solution for challenge', challengeId);
+                        console.log('Solution loaded:', response.data);
+                        
+                        // Set the solution data
+                        this.solutions[challengeId] = response.data.solution;
+                        this.$forceUpdate(); // Force Vue to update
+                        
                     } catch (error) {
                         console.error('Failed to load solution:', error);
-                        this.error = 'Failed to calculate solution: ' + (error.response?.data?.detail || error.message);
+                        const errorMessage = error.response?.data?.detail || error.message || 'Unknown error';
+                        this.solutionErrors[challengeId] = errorMessage;
+                        
+                        // Log the full error for debugging
+                        if (error.response) {
+                            console.log('Error response:', error.response.data);
+                            console.log('Error status:', error.response.status);
+                        }
                     } finally {
-                        this.$set(this.loadingSolutions, challengeId, false);
+                        // Clear loading state
+                        this.loadingSolutions[challengeId] = false;
+                        this.$forceUpdate(); // Force Vue to update
                     }
                 },
                 
@@ -1184,6 +1220,28 @@ async def sbc_browser():
 </body>
 </html>
     """)
+
+@app.get("/test-solution")
+async def test_solution():
+    """Test the solution calculator with mock data"""
+    mock_requirements = [
+        {"kind": "team_rating_min", "value": "84", "key": None, "op": None},
+        {"kind": "min_from", "value": "2", "key": "Premier League", "op": None}
+    ]
+    
+    try:
+        solution = solve_simple_sbc(mock_requirements)
+        return {
+            "test": "success",
+            "mock_requirements": mock_requirements,
+            "solution": solution
+        }
+    except Exception as e:
+        return {
+            "test": "failed", 
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 
 # ==================== DEBUG ENDPOINTS ====================
 
