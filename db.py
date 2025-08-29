@@ -1,5 +1,3 @@
-# db.py
-
 import os
 import asyncpg
 from typing import Any, Dict, Optional, List
@@ -17,9 +15,6 @@ __all__ = [
 
 POOL: Optional[asyncpg.Pool] = None
 
-
-# ------------------------- Connection Pool -------------------------
-
 async def get_pool() -> asyncpg.Pool:
     global POOL
     if POOL is None:
@@ -31,9 +26,6 @@ async def get_pool() -> asyncpg.Pool:
         except Exception as e:
             raise RuntimeError(f"Failed to connect to Postgres: {e}")
     return POOL
-
-
-# ------------------------- Schema -------------------------
 
 SBC_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS sbc_sets (
@@ -73,20 +65,15 @@ CREATE INDEX IF NOT EXISTS idx_challenges_set ON sbc_challenges(sbc_set_id);
 CREATE INDEX IF NOT EXISTS idx_requirements_challenge ON sbc_requirements(challenge_id);
 """
 
-
 async def init_db():
-    """Initialize database with SBC tables"""
     pool = await get_pool()
     async with pool.acquire() as con:
         await con.execute(SBC_SCHEMA_SQL)
     print("✅ SBC database schema initialized")
 
-
 async def mark_all_inactive_before(ts: datetime):
-    """Mark SBC sets as inactive before a given timestamp"""
     pool = await get_pool()
     async with pool.acquire() as con:
-        # We need a CTE to count rows affected by UPDATE
         count = await con.fetchval(
             """
             WITH updated AS (
@@ -101,11 +88,8 @@ async def mark_all_inactive_before(ts: datetime):
         )
     print(f"📊 Marked {count} SBC sets as inactive")
 
-
-# ------------------------- Upsert Set + Challenges -------------------------
-
 async def upsert_set(payload: Dict[str, Any]) -> int:
-    """Insert or update an SBC set and its challenges"""
+    """Insert or update an SBC set and, if present, its challenges."""
     pool = await get_pool()
 
     rewards_text = ", ".join(
@@ -114,7 +98,6 @@ async def upsert_set(payload: Dict[str, Any]) -> int:
     now = datetime.now(timezone.utc)
 
     async with pool.acquire() as con:
-        # Upsert the main SBC set
         set_id = await con.fetchval(
             """
             INSERT INTO sbc_sets (
@@ -140,44 +123,45 @@ async def upsert_set(payload: Dict[str, Any]) -> int:
             now,
         )
 
-        # Delete existing challenges for this set (clean slate)
-        await con.execute("DELETE FROM sbc_challenges WHERE sbc_set_id = $1", set_id)
+        incoming = payload.get("sub_challenges", []) or []
 
-        # Insert challenges and requirements
-        for idx, ch in enumerate(payload.get("sub_challenges", [])):
-            ch_id = await con.fetchval(
-                """
-                INSERT INTO sbc_challenges (sbc_set_id, name, site_cost, reward_text, order_index)
-                VALUES ($1, $2, $3, $4, $5)
-                RETURNING id
-                """,
-                set_id,
-                ch.get("name"),
-                ch.get("cost"),
-                ch.get("reward"),
-                idx,
-            )
+        if incoming:
+            # Clear existing only if we have new to write
+            await con.execute("DELETE FROM sbc_challenges WHERE sbc_set_id = $1", set_id)
 
-            for req in ch.get("requirements", []):
-                await con.execute(
-                    "INSERT INTO sbc_requirements (challenge_id, kind, key, op, value) VALUES ($1, $2, $3, $4, $5)",
-                    ch_id,
-                    req.get("kind", "raw"),
-                    req.get("key"),
-                    req.get("op"),
-                    str(req.get("value") if req.get("value") is not None else req.get("text")),
+            for idx, ch in enumerate(incoming):
+                ch_id = await con.fetchval(
+                    """
+                    INSERT INTO sbc_challenges (sbc_set_id, name, site_cost, reward_text, order_index)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING id
+                    """,
+                    set_id,
+                    ch.get("name"),
+                    ch.get("cost"),
+                    ch.get("reward"),
+                    idx,
                 )
 
+                for req in ch.get("requirements", []):
+                    await con.execute(
+                        "INSERT INTO sbc_requirements (challenge_id, kind, key, op, value) VALUES ($1, $2, $3, $4, $5)",
+                        ch_id,
+                        req.get("kind", "raw"),
+                        req.get("key"),
+                        req.get("op"),
+                        str(req.get("value") if req.get("value") is not None else req.get("text")),
+                    )
+        else:
+            # No challenges parsed this run; keep existing ones (only the set row updated)
+            pass
+
     print(
-        f"✅ Upserted SBC set: {payload.get('name')} (ID: {set_id}) with {len(payload.get('sub_challenges', []))} challenges"
+        f"✅ Upserted SBC set: {payload.get('name')} (ID: {set_id}) with {len(incoming)} challenges"
     )
     return set_id
 
-
-# ------------------------- Player Table Discovery + Queries -------------------------
-
 async def discover_player_table() -> Optional[str]:
-    """Discover the player table name by heuristics on column names"""
     pool = await get_pool()
     async with pool.acquire() as con:
         tables = await con.fetch(
@@ -189,10 +173,8 @@ async def discover_player_table() -> Optional[str]:
             ORDER BY table_name
             """
         )
-
         for table in tables:
             table_name = table["table_name"]
-
             columns = await con.fetch(
                 """
                 SELECT column_name
@@ -202,44 +184,13 @@ async def discover_player_table() -> Optional[str]:
                 table_name,
             )
             column_names = [c["column_name"].lower() for c in columns]
-
-            player_indicators = [
-                "rating",
-                "ovr",
-                "overall",
-                "position",
-                "club",
-                "league",
-                "nation",
-                "name",
-            ]
-            matches = sum(
-                1 for indicator in player_indicators if any(indicator in col for col in column_names)
-            )
-
+            indicators = ["rating", "ovr", "overall", "position", "club", "league", "nation", "name"]
+            matches = sum(1 for ind in indicators if any(ind in col for col in column_names))
             if matches >= 4:
                 print(f"🎯 Found likely player table: {table_name}")
-
-                detailed_columns = await con.fetch(
-                    """
-                    SELECT column_name, data_type
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = $1
-                    ORDER BY ordinal_position
-                    """,
-                    table_name,
-                )
-                print(f"  Columns: {', '.join([col['column_name'] for col in detailed_columns])}")
-
-                sample = await con.fetchrow(f'SELECT * FROM "{table_name}" LIMIT 1')
-                if sample:
-                    print(f"  Sample: {dict(sample)}")
-
                 return table_name
-
         print("⚠️ No player table found automatically")
         return None
-
 
 async def get_players_for_solution(
     min_rating: int = 0,
@@ -250,111 +201,67 @@ async def get_players_for_solution(
     position: Optional[str] = None,
     limit: int = 100,
 ) -> List[Dict[str, Any]]:
-    """Get players from the database for building solutions"""
     try:
         player_table = await discover_player_table()
         if not player_table:
-            print("⚠️ No player table found, returning empty result")
             return []
-
         pool = await get_pool()
         async with pool.acquire() as con:
-            columns = await con.fetch(
+            cols = await con.fetch(
                 """
-                SELECT column_name
-                FROM information_schema.columns
+                SELECT column_name FROM information_schema.columns
                 WHERE table_schema = 'public' AND table_name = $1
                 """,
                 player_table,
             )
-            column_names = [c["column_name"] for c in columns]
-            lower_cols = [c.lower() for c in column_names]
+            column_names = [c["column_name"] for c in cols]
+            lower = [c.lower() for c in column_names]
 
-            # Map common variations
-            rating_col = None
-            name_col = None
-            position_col = None
-            club_col = None
-            league_col = None
-            nation_col = None
-            price_col = None
+            def pick(names, want):
+                for i, c in enumerate(lower):
+                    if any(w in c for w in want):
+                        return column_names[i]
+                return None
 
-            for idx, col in enumerate(lower_cols):
-                orig = column_names[idx]  # preserve case
-                if rating_col is None and any(x in col for x in ["rating", "ovr", "overall"]):
-                    rating_col = orig
-                elif name_col is None and any(x in col for x in ["name", "player_name"]):
-                    name_col = orig
-                elif position_col is None and "position" in col:
-                    position_col = orig
-                elif club_col is None and any(x in col for x in ["club", "team"]):
-                    club_col = orig
-                elif league_col is None and "league" in col:
-                    league_col = orig
-                elif nation_col is None and any(x in col for x in ["nation", "country"]):
-                    nation_col = orig
-                elif price_col is None and any(x in col for x in ["price", "cost", "value"]):
-                    price_col = orig
+            rating_col = pick(lower, ["rating", "ovr", "overall"])
+            name_col = pick(lower, ["name", "player_name"])
+            position_col = pick(lower, ["position"])
+            club_col = pick(lower, ["club", "team"])
+            league_col = pick(lower, ["league"])
+            nation_col = pick(lower, ["nation", "country"])
+            price_col = pick(lower, ["price", "cost", "value"])
 
-            select_cols: List[str] = []
-            if name_col:
-                select_cols.append(f'"{name_col}" AS name')
-            if rating_col:
-                select_cols.append(f'"{rating_col}" AS rating')
-            if position_col:
-                select_cols.append(f'"{position_col}" AS position')
-            if club_col:
-                select_cols.append(f'"{club_col}" AS club')
-            if league_col:
-                select_cols.append(f'"{league_col}" AS league')
-            if nation_col:
-                select_cols.append(f'"{nation_col}" AS nation')
-            if price_col:
-                select_cols.append(f'"{price_col}" AS price')
-            else:
-                select_cols.append("1000 AS price")
+            select_cols = []
+            if name_col: select_cols.append(f'"{name_col}" AS name')
+            if rating_col: select_cols.append(f'"{rating_col}" AS rating')
+            if position_col: select_cols.append(f'"{position_col}" AS position')
+            if club_col: select_cols.append(f'"{club_col}" AS club')
+            if league_col: select_cols.append(f'"{league_col}" AS league')
+            if nation_col: select_cols.append(f'"{nation_col}" AS nation')
+            if price_col: select_cols.append(f'"{price_col}" AS price')
+            else: select_cols.append("1000 AS price")
 
             if not select_cols:
-                print("⚠️ No recognizable player columns found")
                 return []
 
-            where_conditions: List[str] = []
-            params: List[Any] = []
-
+            where, params = [], []
             if rating_col and min_rating > 0:
-                where_conditions.append(f'"{rating_col}" >= ${len(params) + 1}')
-                params.append(min_rating)
-
+                where.append(f'"{rating_col}" >= ${len(params)+1}'); params.append(min_rating)
             if rating_col and max_rating < 99:
-                where_conditions.append(f'"{rating_col}" <= ${len(params) + 1}')
-                params.append(max_rating)
-
+                where.append(f'"{rating_col}" <= ${len(params)+1}'); params.append(max_rating)
             if league and league_col:
-                where_conditions.append(f'"{league_col}" ILIKE ${len(params) + 1}')
-                params.append(f"%{league}%")
-
+                where.append(f'"{league_col}" ILIKE ${len(params)+1}'); params.append(f"%{league}%")
             if club and club_col:
-                where_conditions.append(f'"{club_col}" ILIKE ${len(params) + 1}')
-                params.append(f"%{club}%")
-
+                where.append(f'"{club_col}" ILIKE ${len(params)+1}'); params.append(f"%{club}%")
             if nation and nation_col:
-                where_conditions.append(f'"{nation_col}" ILIKE ${len(params) + 1}')
-                params.append(f"%{nation}%")
-
+                where.append(f'"{nation_col}" ILIKE ${len(params)+1}'); params.append(f"%{nation}%")
             if position and position_col:
-                where_conditions.append(f'"{position_col}" = ${len(params) + 1}')
-                params.append(position.upper())
+                where.append(f'"{position_col}" = ${len(params)+1}'); params.append(position.upper())
 
-            where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
-
-            order_by = ""
-            if price_col:
-                order_by = f'ORDER BY "{price_col}"'
-            elif rating_col:
-                order_by = f'ORDER BY "{rating_col}"'
+            where_clause = "WHERE " + " AND ".join(where) if where else ""
+            order_by = f'ORDER BY "{price_col}"' if price_col else (f'ORDER BY "{rating_col}"' if rating_col else "")
 
             params.append(limit)
-
             query = f'''
                 SELECT {", ".join(select_cols)}
                 FROM "{player_table}"
@@ -362,76 +269,48 @@ async def get_players_for_solution(
                 {order_by}
                 LIMIT ${len(params)}
             '''
-
-            print(f"🔍 Query: {query}")
-            print(f"📊 Parameters: {params}")
-
             rows = await con.fetch(query, *params)
-
-            players: List[Dict[str, Any]] = []
-            for row in rows:
-                player = dict(row)
-                player.setdefault("price", 1000)
-                player.setdefault("rating", 75)
-                player.setdefault("position", "CM")
-                player.setdefault("name", "Unknown Player")
-                player.setdefault("club", "Unknown Club")
-                player.setdefault("league", "Unknown League")
-                player.setdefault("nation", "Unknown Nation")
-                players.append(player)
-
-            print(f"✅ Found {len(players)} players matching criteria")
-            return players
-
+            out: List[Dict[str, Any]] = []
+            for r in rows:
+                d = dict(r)
+                d.setdefault("price", 1000)
+                d.setdefault("rating", 75)
+                d.setdefault("position", "CM")
+                d.setdefault("name", "Unknown Player")
+                d.setdefault("club", "Unknown Club")
+                d.setdefault("league", "Unknown League")
+                d.setdefault("nation", "Unknown Nation")
+                out.append(d)
+            return out
     except Exception as e:
         print(f"💥 Database player query failed: {e}")
         return []
 
-
-# ------------------------- DB Stats -------------------------
-
 async def get_database_stats() -> Dict[str, Any]:
-    """Get comprehensive database statistics"""
     try:
         pool = await get_pool()
         async with pool.acquire() as con:
-            sbc_stats = await con.fetchrow(
-                """
-                SELECT
-                  COUNT(*) AS total_sets,
-                  COUNT(*) FILTER (WHERE is_active = TRUE) AS active_sets
+            sbc_stats = await con.fetchrow("""
+                SELECT COUNT(*) AS total_sets,
+                       COUNT(*) FILTER (WHERE is_active = TRUE) AS active_sets
                 FROM sbc_sets
-                """
-            )
-
-            challenge_count = await con.fetchval(
-                """
-                SELECT COUNT(*)
-                FROM sbc_challenges c
+            """)
+            challenge_count = await con.fetchval("""
+                SELECT COUNT(*) FROM sbc_challenges c
                 JOIN sbc_sets s ON c.sbc_set_id = s.id
                 WHERE s.is_active = TRUE
-                """
-            )
-
-            player_table = await discover_player_table()
+            """)
             player_count = 0
-            if player_table:
-                player_count = await con.fetchval(f'SELECT COUNT(*) FROM "{player_table}"')
-
+            pt = await discover_player_table()
+            if pt:
+                player_count = await con.fetchval(f'SELECT COUNT(*) FROM "{pt}"')
             return {
                 "sbc_sets": sbc_stats["total_sets"] if sbc_stats else 0,
                 "active_sbc_sets": sbc_stats["active_sets"] if sbc_stats else 0,
                 "sbc_challenges": challenge_count,
                 "players_in_database": player_count,
-                "player_table": player_table,
+                "player_table": pt,
             }
     except Exception as e:
         print(f"💥 Database stats query failed: {e}")
-        return {
-            "sbc_sets": 0,
-            "active_sbc_sets": 0,
-            "sbc_challenges": 0,
-            "players_in_database": 0,
-            "player_table": None,
-            "error": str(e),
-        }
+        return {"sbc_sets": 0, "active_sbc_sets": 0, "sbc_challenges": 0, "players_in_database": 0, "player_table": None, "error": str(e)}
