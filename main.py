@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from db import init_db, get_pool
 from scheduler import run_job, schedule_loop
-from price_fetcher import solve_sbc_challenge, price_update_loop
 
 app = FastAPI(title="FUT SBC Tracker", description="FIFA Ultimate Team Squad Building Challenge tracker and solver")
 
@@ -37,8 +36,6 @@ async def on_startup():
         asyncio.create_task(_initial_run())
         # Start the daily 18:00 UK scheduler
         asyncio.create_task(schedule_loop())
-        # Start price update loop
-        asyncio.create_task(price_update_loop())
         print("✅ App bootstrapped; background tasks scheduled")
     except Exception as e:
         status["startup_error"] = f"{type(e).__name__}: {e}"
