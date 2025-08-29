@@ -258,12 +258,11 @@ def parse_set_page(html: str, url: str, debug=False) -> Dict[str, Any]:
     containers = find_challenge_containers(soup)
     
     processed_titles = set()
+    processed_requirements = set()  # Track requirement combinations to avoid duplicates
     
     for container, title, source_type in containers:
         if title in processed_titles:
             continue
-        
-        processed_titles.add(title)
         print(f"    Processing challenge '{title}' (from {source_type})")
         
         # Extract requirements with filtering
