@@ -154,7 +154,47 @@ def root():
             </div>
 
             <div class="card">
-                <h3>Step 5: Run Production Crawl</h3>
+                <h3>Step 6: Test Solution Extraction</h3>
+                <button @click="testSolutionExtraction" :disabled="loading">Test Player ID Extraction from Solutions</button>
+                <div v-if="solutionResult" class="log">
+                    <strong>Status:</strong> {{ solutionResult.status }}<br>
+                    <div v-if="solutionResult.status === 'success' || solutionResult.status === 'partial_success'">
+                        <strong>Test URL:</strong> {{ solutionResult.test_url }}<br>
+                        <strong>Player IDs Found:</strong> {{ solutionResult.player_ids_found }}<br>
+                        <strong>Players in Database:</strong> {{ solutionResult.players_in_database || 'N/A' }}<br>
+                        
+                        <div v-if="solutionResult.sample_player_ids" class="highlight">
+                            <strong>Sample Player IDs:</strong><br>
+                            {{ solutionResult.sample_player_ids.join(', ') }}
+                        </div>
+                        
+                        <div v-if="solutionResult.sample_players" class="success">
+                            <strong>Sample Players from Database:</strong><br>
+                            <div v-for="player in solutionResult.sample_players" :key="player.card_id" style="margin-left: 20px;">
+                                • {{ player.name }} ({{ player.rating }} OVR, {{ player.position }}) - {{ player.price.toLocaleString() }} coins
+                            </div>
+                        </div>
+                        
+                        <div v-if="solutionResult.solution_stats" class="highlight">
+                            <strong>Solution Stats:</strong><br>
+                            • Total Cost: {{ solutionResult.solution_stats.total_cost.toLocaleString() }} coins<br>
+                            • Average Rating: {{ solutionResult.solution_stats.average_rating }}<br>
+                            • Player Count: {{ solutionResult.solution_stats.player_count }}
+                        </div>
+                        
+                        <div v-if="solutionResult.database_error" class="warning">
+                            <strong>Database Issue:</strong> {{ solutionResult.database_error }}
+                        </div>
+                    </div>
+                    
+                    <div v-if="solutionResult.error" class="error">
+                        <strong>Error:</strong> {{ solutionResult.error }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Step 7: Run Production Crawl</h3>
                 <button @click="runEnhancedCrawl" :disabled="loading" class="warning-button">Run Full Enhanced Crawl & Store in Database</button>
                 <div v-if="productionCrawlResult" class="log">
                     <strong>Status:</strong> {{ productionCrawlResult.status }}<br>
@@ -189,6 +229,7 @@ def root():
                     domResult: null,
                     enhancedCrawlerResult: null,
                     singleSbcResult: null,
+                    solutionResult: null,
                     productionCrawlResult: null
                 }
             },
@@ -200,6 +241,15 @@ def root():
                         this.connectivityResult = res.data;
                     } catch (e) {
                         this.connectivityResult = { success: false, message: e.message };
+                    }
+                    this.loading = false;
+                async testSolutionExtraction() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/test-solution-extraction');
+                        this.solutionResult = res.data;
+                    } catch (e) {
+                        this.solutionResult = { status: 'error', error: e.message };
                     }
                     this.loading = false;
                 },
@@ -562,6 +612,118 @@ async def run_enhanced_crawl():
             "error": str(e),
             "traceback": traceback.format_exc()
         }
+
+@app.get("/debug/test-solution-extraction")
+async def test_solution_extraction():
+    """Test extracting player IDs from solution pages"""
+    try:
+        from solution_extractor import SolutionExtractor, get_player_data_from_database
+        from db import get_pool
+        
+        test_solution_url = "https://www.fut.gg/25/squad-builder/2e669820-9dc8-4ce7-af74-c75133f074c8/"
+        
+        # Extract player IDs
+        async with SolutionExtractor(use_browser=True) as extractor:
+            player_ids = await extractor.get_solution_players(test_solution_url)
+        
+        if not player_ids:
+            return {
+                "status": "error",
+                "error": "No player IDs found in solution page"
+            }
+        
+        # Get player data from database
+        try:
+            pool = await get_pool()
+            players = await get_player_data_from_database(player_ids, pool)
+            
+            total_cost = sum(p.get("price", 0) for p in players)
+            avg_rating = sum(p.get("rating", 0) for p in players) / len(players) if players else 0
+            
+            return {
+                "status": "success",
+                "test_url": test_solution_url,
+                "player_ids_found": len(player_ids),
+                "players_in_database": len(players),
+                "sample_player_ids": player_ids[:5],
+                "sample_players": players[:5],
+                "solution_stats": {
+                    "total_cost": total_cost,
+                    "average_rating": round(avg_rating, 1),
+                    "player_count": len(players)
+                }
+            }
+            
+        except Exception as e:
+            return {
+                "status": "partial_success",
+                "player_ids_found": len(player_ids),
+                "sample_player_ids": player_ids[:5],
+                "database_error": str(e),
+                "note": "Player ID extraction worked, but database lookup failed"
+            }
+            
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+@app.get("/solutions/{sbc_name}")
+async def get_sbc_solutions(sbc_name: str):
+    """Get all solutions for a specific SBC with player data"""
+    try:
+        from solution_extractor import get_sbc_solutions_with_players
+        from db import get_pool
+        
+        # Construct SBC URL from name
+        sbc_url = f"https://www.fut.gg/sbc/players/{sbc_name}/"
+        
+        pool = await get_pool()
+        solutions_data = await get_sbc_solutions_with_players(sbc_url, pool)
+        
+        return {
+            "status": "success",
+            "sbc_name": sbc_name,
+            **solutions_data
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+@app.get("/player/{card_id}")
+async def get_player_by_card_id(card_id: int):
+    """Get player data by card_id"""
+    try:
+        from db import get_pool
+        
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            player = await conn.fetchrow("""
+                SELECT card_id, name, rating, position, club, league, nation, price
+                FROM fut_players 
+                WHERE card_id = $1
+            """, card_id)
+            
+            if not player:
+                raise HTTPException(status_code=404, detail=f"Player with card_id {card_id} not found")
+            
+            return {
+                "status": "success",
+                "player": dict(player)
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 def health():
