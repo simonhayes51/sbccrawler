@@ -46,9 +46,43 @@ def root():
                     </div>
                 </div>
             </div>
+
+            <div class="card">
+                <h3>Step 2: Test JavaScript Analysis</h3>
+                <button @click="testJsAnalysis" :disabled="loading">Analyze Squad Builder JavaScript</button>
+                <div v-if="jsAnalysisResult" class="log">
+                    <strong>Status:</strong> {{ jsAnalysisResult.status }}<br>
+                    <div v-if="jsAnalysisResult.status === 'success'">
+                        <strong>JS File Size:</strong> {{ jsAnalysisResult.js_file_size }}<br>
+                        
+                        <div v-if="jsAnalysisResult.api_endpoints && Object.keys(jsAnalysisResult.api_endpoints).length > 0">
+                            <strong>API Endpoints Found:</strong><br>
+                            <div v-for="(endpoints, pattern) in jsAnalysisResult.api_endpoints" :key="pattern" class="highlight">
+                                <strong>{{ pattern }}:</strong><br>
+                                <div v-for="endpoint in endpoints" :key="endpoint" style="margin-left: 20px;">
+                                    • {{ endpoint }}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div v-if="jsAnalysisResult.sbc_references && Object.keys(jsAnalysisResult.sbc_references).length > 0">
+                            <strong>SBC References:</strong><br>
+                            <div v-for="(refs, pattern) in jsAnalysisResult.sbc_references" :key="pattern" class="success">
+                                <strong>{{ pattern }}:</strong> {{ refs.join(', ') }}
+                            </div>
+                        </div>
+                        
+                        <strong>Recommendation:</strong> {{ jsAnalysisResult.recommendation }}
+                    </div>
+                    
+                    <div v-if="jsAnalysisResult.error" class="error">
+                        <strong>Error:</strong> {{ jsAnalysisResult.error }}
+                    </div>
+                </div>
+            </div>
             
             <div class="card">
-                <h3>Step 9: Test Enhanced Crawler</h3>
+                <h3>Step 3: Test Enhanced Crawler</h3>
                 <button @click="testEnhancedCrawler" :disabled="loading">Test Enhanced Crawler (Browser + Static)</button>
                 <div v-if="enhancedCrawlerResult" class="log">
                     <strong>Status:</strong> {{ enhancedCrawlerResult.status }}<br>
@@ -72,6 +106,20 @@ def root():
                             • Additional Requirements Found: {{ enhancedCrawlerResult.improvement.requirements_improvement }}<br>
                             • Percentage Increase: {{ enhancedCrawlerResult.improvement.percentage_increase }}%
                         </div>
+                        
+                        <div v-if="enhancedCrawlerResult.dynamic_crawl.sample_sbc" style="margin-top: 15px;">
+                            <strong>Sample SBC:</strong><br>
+                            <div class="highlight">
+                                <strong>Name:</strong> {{ enhancedCrawlerResult.dynamic_crawl.sample_sbc.name }}<br>
+                                <strong>Challenges:</strong> {{ enhancedCrawlerResult.dynamic_crawl.sample_sbc.sub_challenges?.length || 0 }}<br>
+                                <div v-if="enhancedCrawlerResult.dynamic_crawl.sample_sbc.sub_challenges?.[0]?.requirements">
+                                    <strong>Sample Requirements:</strong><br>
+                                    <div v-for="req in enhancedCrawlerResult.dynamic_crawl.sample_sbc.sub_challenges[0].requirements.slice(0, 3)" :key="req.text" style="margin-left: 20px;">
+                                        • {{ req.text || req.kind }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     
                     <div v-if="enhancedCrawlerResult.error" class="error">
@@ -82,7 +130,7 @@ def root():
             </div>
 
             <div class="card">
-                <h3>Step 10: Test Single SBC Enhanced</h3>
+                <h3>Step 4: Test Single SBC Enhanced</h3>
                 <button @click="testSingleSbcEnhanced" :disabled="loading">Test Enhanced Parsing on Sample SBC</button>
                 <div v-if="singleSbcResult" class="log">
                     <strong>Status:</strong> {{ singleSbcResult.status }}<br>
@@ -109,7 +157,7 @@ def root():
             </div>
 
             <div class="card">
-                <h3>Step 11: Run Production Crawl</h3>
+                <h3>Step 5: Run Production Crawl</h3>
                 <button @click="runEnhancedCrawl" :disabled="loading" class="warning-button">Run Full Enhanced Crawl & Store in Database</button>
                 <div v-if="productionCrawlResult" class="log">
                     <strong>Status:</strong> {{ productionCrawlResult.status }}<br>
@@ -141,6 +189,7 @@ def root():
                 return {
                     loading: false,
                     connectivityResult: null,
+                    jsAnalysisResult: null,
                     enhancedCrawlerResult: null,
                     singleSbcResult: null,
                     productionCrawlResult: null
@@ -154,6 +203,16 @@ def root():
                         this.connectivityResult = res.data;
                     } catch (e) {
                         this.connectivityResult = { success: false, message: e.message };
+                    }
+                    this.loading = false;
+                },
+                async testJsAnalysis() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/analyze-squad-builder-js');
+                        this.jsAnalysisResult = res.data;
+                    } catch (e) {
+                        this.jsAnalysisResult = { status: 'error', error: e.message };
                     }
                     this.loading = false;
                 },
@@ -216,18 +275,91 @@ async def debug_connectivity():
             "message": f"Connection failed: {str(e)}"
         }
 
+@app.get("/debug/analyze-squad-builder-js")
+async def analyze_squad_builder_js():
+    """Analyze the Squad Builder JavaScript for API patterns"""
+    try:
+        # The minified JavaScript content from the document
+        js_content = """import{n as e,o as s,R as a,Z as i,r as t,_ as l,$ as o,a0 as n,Q as r,l as d,M as c,v as u,y as m,a1 as v,j as p,x as h,U as x,a2 as b,a3 as y}from"./vendor.2.-HZvaLpMr.js";import{S as g,w as j,x as C,y as f,F as _,z as N,A as I,B as q,E as k,l as S,G as P,H as T,I as A,J as E,f as F,T as L,K as R,M,N as D,O,Q as w,U,W as z,X as B,Y as V,Z as H,_ as G,$ as Y,a0 as $,a1 as K,a2 as Q,a3 as W,a4 as J,u as Z,a5 as X,a6 as ee,a7 as se,a8 as ae,a9 as ie,aa as te,ab as le,ac as oe,ad as ne,ae as re,af as de,ag as ce,ah as ue,ai as me,aj as ve,ak as pe,al as he,am as xe,an as be,ao as ye,ap as ge,aq as je,ar as Ce,as as fe,at as _e,au as Ne,av as Ie,aw as qe,ax as ke,ay as Se,az as Pe,aA as Te,aB as Ae,aC as Ee,aD as Fe,h as Le,aE as Re,aF as Me,aG as De,aH as Oe,aI as we,aJ as Ue,aK as ze,aL as Be,aM as Ve,aN as He,aO as Ge,aP as Ye,aQ as $e,n as Ke,L as Qe}from"./apps.2.-D9Nv3rHf.js";import{C as We,a as Je,T as Ze,I as Xe,S as es,b as ss,E as as,u as is,s as ts}from"./EllipsisSolidSvg.2.-orzIb8WP.js"""
+        
+        import re
+        
+        # Look for API endpoint patterns in the minified JS
+        api_patterns = [
+            r'"/api/[^"]*"',
+            r'"/sbc/[^"]*"', 
+            r'"https://[^"]*api[^"]*"',
+            r'fetch\s*\([^)]*\)',
+            r'axios\.[^(]*\([^)]*\)',
+            r'useQuery\([^)]*\)',
+            r'useLazyQuery\([^)]*\)',
+            r'useGet[^(]*Query\(',
+        ]
+        
+        found_endpoints = {}
+        for pattern in api_patterns:
+            matches = re.findall(pattern, js_content, re.IGNORECASE)
+            if matches:
+                # Clean up matches and remove duplicates
+                cleaned_matches = list(set([match.strip('"') for match in matches]))
+                found_endpoints[pattern] = cleaned_matches[:10]  # First 10 matches
+        
+        # Look for specific SBC-related patterns
+        sbc_patterns = [
+            r'"sbc[^"]*"',
+            r'"challenge[^"]*"',
+            r'"requirement[^"]*"',
+            r'"squad[^"]*"',
+            r'getSquad[^(]*\(',
+            r'getSbc[^(]*\(',
+            r'useGetSbc[^(]*Query\(',
+            r'useGetSquad[^(]*Query\(',
+        ]
+        
+        sbc_references = {}
+        for pattern in sbc_patterns:
+            matches = re.findall(pattern, js_content, re.IGNORECASE)
+            if matches:
+                cleaned_matches = list(set([match.strip('"') for match in matches]))
+                sbc_references[pattern] = cleaned_matches[:5]
+        
+        # Look for GraphQL or API query patterns
+        query_patterns = [
+            r'query\s+[A-Z][a-zA-Z]*\s*{[^}]*}',
+            r'mutation\s+[A-Z][a-zA-Z]*\s*{[^}]*}',
+            r'gql`[^`]*`',
+        ]
+        
+        queries = {}
+        for pattern in query_patterns:
+            matches = re.findall(pattern, js_content, re.IGNORECASE | re.DOTALL)
+            if matches:
+                queries[pattern] = matches[:3]
+        
+        return {
+            "status": "success",
+            "js_file_size": len(js_content),
+            "api_endpoints": found_endpoints,
+            "sbc_references": sbc_references,
+            "graphql_queries": queries,
+            "recommendation": "Check the api_endpoints for actual data fetching URLs"
+        }
+        
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
 @app.get("/debug/test-enhanced-crawler")
 async def test_enhanced_crawler():
     """Test the new enhanced crawler with browser automation"""
     try:
         from enhanced_crawler import crawl_all_sets_enhanced
         
-        # Test with browser automation - limit to first 5 SBCs for quick testing
+        # Test with browser automation - limit to first 3 SBCs for quick testing
         print("🔄 Testing enhanced crawler with browser automation...")
         results_dynamic = await crawl_all_sets_enhanced(use_browser=True, debug_first=True)
         
-        # Limit to first 5 for testing
-        results_dynamic = results_dynamic[:5]
+        # Limit to first 3 for testing
+        results_dynamic = results_dynamic[:3]
         
         # Count requirements found
         total_requirements = 0
@@ -238,7 +370,7 @@ async def test_enhanced_crawler():
         # Test with static only for comparison
         print("🔄 Testing enhanced crawler static only...")
         results_static = await crawl_all_sets_enhanced(use_browser=False, debug_first=True)
-        results_static = results_static[:5]
+        results_static = results_static[:3]
         
         static_requirements = 0
         for sbc in results_static:
@@ -285,7 +417,7 @@ async def test_single_sbc_enhanced():
         from enhanced_crawler import EnhancedSBCCrawler
         import httpx
         
-        test_url = "https://www.fut.gg/sbc/upgrades/25-3-gold-upgrade/"
+        test_url = "https://www.fut.gg/sbc/players/25-1253-georgia-stanway/"
         
         async with EnhancedSBCCrawler(use_browser=True) as crawler:
             async with httpx.AsyncClient() as client:
