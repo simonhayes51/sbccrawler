@@ -21,6 +21,8 @@ def root():
         h1 { color: #333; margin-bottom: 20px; }
         button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
         button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .warning-button { background: #e67e22 !important; }
+        .warning-button:hover { background: #d35400 !important; }
         .log { background: #f8f9fa; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
         .error { background: #f8d7da; color: #721c24; }
         .success { background: #d4edda; color: #155724; }
@@ -174,6 +176,100 @@ def root():
                 </div>
             </div>
             
+            <div class="card">
+                <h3>Step 9: Test Enhanced Crawler</h3>
+                <button @click="testEnhancedCrawler" :disabled="loading">Test Enhanced Crawler (Browser + Static)</button>
+                <div v-if="enhancedCrawlerResult" class="log">
+                    <strong>Status:</strong> {{ enhancedCrawlerResult.status }}<br>
+                    <div v-if="enhancedCrawlerResult.status === 'success'">
+                        <div class="success">
+                            <strong>🤖 Dynamic Crawl (with Browser):</strong><br>
+                            • SBCs Found: {{ enhancedCrawlerResult.dynamic_crawl.sbcs_found }}<br>
+                            • Total Requirements: {{ enhancedCrawlerResult.dynamic_crawl.total_requirements }}<br>
+                            • Avg Requirements/SBC: {{ enhancedCrawlerResult.dynamic_crawl.avg_requirements_per_sbc }}
+                        </div>
+                        
+                        <div class="warning" style="margin: 10px 0;">
+                            <strong>📄 Static Crawl (HTML only):</strong><br>
+                            • SBCs Found: {{ enhancedCrawlerResult.static_crawl.sbcs_found }}<br>
+                            • Total Requirements: {{ enhancedCrawlerResult.static_crawl.total_requirements }}<br>
+                            • Avg Requirements/SBC: {{ enhancedCrawlerResult.static_crawl.avg_requirements_per_sbc }}
+                        </div>
+                        
+                        <div class="highlight">
+                            <strong>📈 Improvement:</strong><br>
+                            • Additional Requirements Found: {{ enhancedCrawlerResult.improvement.requirements_improvement }}<br>
+                            • Percentage Increase: {{ enhancedCrawlerResult.improvement.percentage_increase }}%
+                        </div>
+                        
+                        <div v-if="enhancedCrawlerResult.dynamic_crawl.sample_sbc" style="margin-top: 15px;">
+                            <strong>Sample SBC:</strong><br>
+                            <div class="highlight">
+                                <strong>Name:</strong> {{ enhancedCrawlerResult.dynamic_crawl.sample_sbc.name }}<br>
+                                <strong>Challenges:</strong> {{ enhancedCrawlerResult.dynamic_crawl.sample_sbc.sub_challenges?.length || 0 }}<br>
+                                <div v-if="enhancedCrawlerResult.dynamic_crawl.sample_sbc.sub_challenges?.[0]?.requirements">
+                                    <strong>Sample Requirements:</strong><br>
+                                    <div v-for="req in enhancedCrawlerResult.dynamic_crawl.sample_sbc.sub_challenges[0].requirements.slice(0, 3)" :key="req.text" style="margin-left: 20px;">
+                                        • {{ req.text || req.kind }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div v-if="enhancedCrawlerResult.error" class="error">
+                        <strong>Error:</strong> {{ enhancedCrawlerResult.error }}<br>
+                        <small v-if="enhancedCrawlerResult.details">{{ enhancedCrawlerResult.details }}</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Step 10: Test Single SBC Enhanced</h3>
+                <button @click="testSingleSbcEnhanced" :disabled="loading">Test Enhanced Parsing on Sample SBC</button>
+                <div v-if="singleSbcResult" class="log">
+                    <strong>Status:</strong> {{ singleSbcResult.status }}<br>
+                    <div v-if="singleSbcResult.status === 'success'">
+                        <strong>Test URL:</strong> {{ singleSbcResult.test_url }}<br>
+                        <strong>SBC Name:</strong> {{ singleSbcResult.sbc_name }}<br>
+                        <strong>Challenges Found:</strong> {{ singleSbcResult.challenges_found }}<br>
+                        <strong>Total Requirements:</strong> {{ singleSbcResult.total_requirements }}<br>
+                        
+                        <div v-if="singleSbcResult.sample_challenge" class="highlight">
+                            <strong>Sample Challenge:</strong><br>
+                            <strong>Name:</strong> {{ singleSbcResult.sample_challenge.name }}<br>
+                            <strong>Requirements ({{ singleSbcResult.sample_challenge.requirements?.length || 0 }}):</strong><br>
+                            <div v-for="req in singleSbcResult.sample_challenge.requirements?.slice(0, 5)" :key="req.text" style="margin-left: 20px;">
+                                • <strong>{{ req.kind }}:</strong> {{ req.text || req.value }}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div v-if="singleSbcResult.error" class="error">
+                        <strong>Error:</strong> {{ singleSbcResult.error }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Step 11: Run Production Crawl</h3>
+                <button @click="runEnhancedCrawl" :disabled="loading" class="warning-button">Run Full Enhanced Crawl & Store in Database</button>
+                <div v-if="productionCrawlResult" class="log">
+                    <strong>Status:</strong> {{ productionCrawlResult.status }}<br>
+                    <div v-if="productionCrawlResult.status === 'success'" class="success">
+                        <strong>SBCs Crawled:</strong> {{ productionCrawlResult.sbcs_crawled }}<br>
+                        <strong>SBCs Stored:</strong> {{ productionCrawlResult.sbcs_stored }}<br>
+                        <strong>Total Requirements Found:</strong> {{ productionCrawlResult.total_requirements_found }}<br>
+                        <strong>Avg Requirements per SBC:</strong> {{ productionCrawlResult.avg_requirements_per_sbc }}<br>
+                        <strong>Database Updated:</strong> {{ productionCrawlResult.database_updated ? '✅ Yes' : '❌ No' }}
+                    </div>
+                    
+                    <div v-if="productionCrawlResult.error" class="error">
+                        <strong>Error:</strong> {{ productionCrawlResult.error }}
+                    </div>
+                </div>
+            </div>
+            
             <div v-if="loading" style="text-align: center; margin: 20px;">
                 <div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #f3f3f3; border-top: 2px solid #007bff; border-radius: 50%; animation: spin 1s linear infinite;"></div>
                 <p>Loading...</p>
@@ -194,7 +290,10 @@ def root():
                     newParserResult: null,
                     apiResult: null,
                     targetedResult: null,
-                    crawlResult: null
+                    crawlResult: null,
+                    enhancedCrawlerResult: null,
+                    singleSbcResult: null,
+                    productionCrawlResult: null
                 }
             },
             methods: {
@@ -277,6 +376,36 @@ def root():
                         this.crawlResult = { status: 'error', details: e.message };
                     }
                     this.loading = false;
+                },
+                async testEnhancedCrawler() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/test-enhanced-crawler');
+                        this.enhancedCrawlerResult = res.data;
+                    } catch (e) {
+                        this.enhancedCrawlerResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
+                },
+                async testSingleSbcEnhanced() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/test-single-sbc-enhanced');
+                        this.singleSbcResult = res.data;
+                    } catch (e) {
+                        this.singleSbcResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
+                },
+                async runEnhancedCrawl() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/run-enhanced-crawl', { timeout: 300000 }); // 5 minutes
+                        this.productionCrawlResult = res.data;
+                    } catch (e) {
+                        this.productionCrawlResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
                 }
             }
         }).mount('#app');
@@ -324,42 +453,152 @@ def analyze_api_results(results):
         "total_json": len(json_endpoints)
     }
 
-@app.get("/debug/analyze-js-module")
-async def analyze_js_module():
-    """Analyze the discovered JavaScript module"""
+@app.get("/debug/test-enhanced-crawler")
+async def test_enhanced_crawler():
+    """Test the new enhanced crawler with browser automation"""
     try:
-        import httpx
-        import re
+        from enhanced_crawler import crawl_all_sets_enhanced
         
-        async with httpx.AsyncClient() as client:
-            response = await client.get("https://assets.fut.gg/ts/assets/_sbcListLayout-OCacVWPE.js", timeout=10)
-            js_content = response.text
-            
-            # Look for API endpoints in the JavaScript
-            api_patterns = [
-                r'"/api/[^"]*"',
-                r"'/api/[^']*'",
-                r'fetch\([^)]*\)',
-                r'axios\.[^(]*\([^)]*\)',
-                r'"https://[^"]*api[^"]*"',
-                r"'https://[^']*api[^']*'",
-            ]
-            
-            found_apis = []
-            for pattern in api_patterns:
-                matches = re.findall(pattern, js_content)
-                found_apis.extend(matches)
-            
-            return {
-                "status": "success",
-                "js_size": len(js_content),
-                "potential_apis": list(set(found_apis)),
-                "preview": js_content[:1000]
+        # Test with browser automation
+        print("🔄 Testing enhanced crawler with browser automation...")
+        results_dynamic = await crawl_all_sets_enhanced(use_browser=True, debug_first=True)
+        
+        # Count requirements found
+        total_requirements = 0
+        for sbc in results_dynamic:
+            for challenge in sbc.get('sub_challenges', []):
+                total_requirements += len(challenge.get('requirements', []))
+        
+        # Test with static only for comparison
+        print("🔄 Testing enhanced crawler static only...")
+        results_static = await crawl_all_sets_enhanced(use_browser=False, debug_first=True)
+        
+        static_requirements = 0
+        for sbc in results_static:
+            for challenge in sbc.get('sub_challenges', []):
+                static_requirements += len(challenge.get('requirements', []))
+        
+        return {
+            "status": "success",
+            "dynamic_crawl": {
+                "sbcs_found": len(results_dynamic),
+                "total_requirements": total_requirements,
+                "avg_requirements_per_sbc": round(total_requirements / len(results_dynamic), 1) if results_dynamic else 0,
+                "sample_sbc": results_dynamic[0] if results_dynamic else None
+            },
+            "static_crawl": {
+                "sbcs_found": len(results_static),
+                "total_requirements": static_requirements,
+                "avg_requirements_per_sbc": round(static_requirements / len(results_static), 1) if results_static else 0
+            },
+            "improvement": {
+                "requirements_improvement": total_requirements - static_requirements,
+                "percentage_increase": round(((total_requirements - static_requirements) / max(static_requirements, 1)) * 100, 1)
             }
+        }
+        
+    except ImportError as e:
+        return {
+            "status": "error",
+            "error": "Enhanced crawler not available. Make sure enhanced_crawler.py is in the project directory.",
+            "details": str(e)
+        }
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 
-# Debug endpoints
+@app.get("/debug/test-single-sbc-enhanced")
+async def test_single_sbc_enhanced():
+    """Test enhanced parsing on a single SBC page"""
+    try:
+        from enhanced_crawler import EnhancedSBCCrawler
+        import httpx
+        
+        test_url = "https://www.fut.gg/sbc/upgrades/25-3-gold-upgrade/"
+        
+        async with EnhancedSBCCrawler(use_browser=True) as crawler:
+            async with httpx.AsyncClient() as client:
+                result = await crawler.parse_sbc_page_enhanced(test_url, client)
+        
+        # Count requirements found
+        total_requirements = sum(len(ch.get('requirements', [])) 
+                               for ch in result.get('sub_challenges', []))
+        
+        return {
+            "status": "success",
+            "test_url": test_url,
+            "sbc_name": result.get("name"),
+            "challenges_found": len(result.get('sub_challenges', [])),
+            "total_requirements": total_requirements,
+            "sample_challenge": result.get('sub_challenges', [{}])[0] if result.get('sub_challenges') else None,
+            "full_result": result
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+@app.get("/debug/run-enhanced-crawl")
+async def run_enhanced_crawl():
+    """Run a full enhanced crawl and store in database"""
+    try:
+        from enhanced_crawler import crawl_all_sets_enhanced
+        from db import init_db, upsert_set, mark_all_inactive_before
+        from datetime import datetime, timezone
+        
+        # Initialize database
+        await init_db()
+        
+        # Mark existing records as potentially inactive
+        cutoff = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        await mark_all_inactive_before(cutoff)
+        
+        # Run enhanced crawl
+        print("🔄 Starting enhanced crawl...")
+        results = await crawl_all_sets_enhanced(use_browser=True, debug_first=False)
+        
+        # Store results in database
+        stored_count = 0
+        total_requirements = 0
+        
+        for sbc_data in results:
+            try:
+                await upsert_set(sbc_data)
+                stored_count += 1
+                
+                # Count requirements
+                for challenge in sbc_data.get('sub_challenges', []):
+                    total_requirements += len(challenge.get('requirements', []))
+                    
+            except Exception as e:
+                print(f"⚠️ Failed to store SBC {sbc_data.get('name')}: {e}")
+        
+        return {
+            "status": "success", 
+            "sbcs_crawled": len(results),
+            "sbcs_stored": stored_count,
+            "total_requirements_found": total_requirements,
+            "avg_requirements_per_sbc": round(total_requirements / len(results), 1) if results else 0,
+            "database_updated": True
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+# Original debug endpoints (keep these)
 @app.get("/debug/connectivity")
 async def debug_connectivity():
     """Test basic connectivity to fut.gg"""
@@ -591,331 +830,3 @@ async def test_new_parser():
                     if any(keyword in line_lower for keyword in requirement_keywords):
                         if 5 < len(line) < 150:  # Reasonable length
                             requirements.append(line)
-                
-                sample_details = {
-                    "url": sample_url,
-                    "title_from_page": detail_soup.select_one('title').get_text() if detail_soup.select_one('title') else "No title",
-                    "requirements_found": len(requirements),
-                    "sample_requirements": requirements[:5]
-                }
-        
-        return {
-            "status": "success",
-            "sbcs_found": len(sbcs),
-            "sample_sbcs": sbcs[:3],
-            "sample_details": sample_details
-        }
-        
-    except Exception as e:
-        import traceback
-        return {
-            "status": "error",
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
-
-@app.get("/debug/api-test")
-async def test_futgg_api():
-    """Test if fut.gg has accessible JSON APIs based on the JavaScript"""
-    try:
-        import httpx
-        
-        # API endpoints suggested by the JavaScript
-        api_endpoints = [
-            "/sbc/_sbcListLayout",
-            "/api/sbc/list",
-            "/api/sbcs", 
-            "/sbc/api/list",
-            "/_sbcListLayout",
-            "/sbc/_layout"
-        ]
-        
-        results = {}
-        
-        async with httpx.AsyncClient() as client:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "application/json, text/plain, */*",
-                "Referer": "https://www.fut.gg/sbc/"
-            }
-            
-            for endpoint in api_endpoints:
-                try:
-                    full_url = f"https://www.fut.gg{endpoint}"
-                    response = await client.get(full_url, headers=headers, timeout=10)
-                    
-                    results[endpoint] = {
-                        "status": response.status_code,
-                        "content_type": response.headers.get("content-type", ""),
-                        "content_length": len(response.text),
-                        "is_json": response.headers.get("content-type", "").startswith("application/json"),
-                        "preview": response.text[:200] + "..." if len(response.text) > 200 else response.text
-                    }
-                    
-                    # If it's JSON, try to parse it
-                    if results[endpoint]["is_json"]:
-                        try:
-                            json_data = response.json()
-                            results[endpoint]["json_keys"] = list(json_data.keys()) if isinstance(json_data, dict) else "array"
-                            results[endpoint]["json_preview"] = str(json_data)[:300] + "..." if len(str(json_data)) > 300 else str(json_data)
-                        except:
-                            results[endpoint]["json_error"] = "Failed to parse JSON"
-                    
-                except Exception as e:
-                    results[endpoint] = {"error": str(e)}
-        
-        return {
-            "status": "completed",
-            "total_endpoints_tested": len(api_endpoints),
-            "results": results,
-            "analysis": analyze_api_results(results)
-        }
-        
-    except Exception as e:
-        import traceback
-        return {
-            "status": "error",
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
-
-@app.get("/debug/targeted-api-test")
-async def test_targeted_apis():
-    """Test specific API endpoints discovered from JavaScript analysis"""
-    try:
-        import httpx
-        import json
-        
-        # Based on the main-BKSLzfgU.js file, these are high-priority endpoints
-        high_priority_endpoints = [
-            # Direct module references from the JS
-            "/sbc/_sbcListLayout",  # From original JS + confirmed in main file
-            "/_sbcListLayout",
-            "/assets/_sbcListLayout-OCacVWPE.js",  # The actual module file
-            
-            # Category-based endpoints from the JS structure
-            "/sbc/_sbcListLayout.category",
-            "/sbc/category/players/_sbcListLayout", 
-            "/sbc/category/icons/_sbcListLayout",
-            "/sbc/category/upgrades/_sbcListLayout",
-            
-            # Common API patterns for the discovered modules
-            "/api/sbc/_sbcListLayout",
-            "/sbc/api/_sbcListLayout",
-            
-            # Try to get raw data that feeds these modules
-            "/sbc/_sbcListLayout.json",
-            "/sbc/data/_sbcListLayout",
-            
-            # Next.js data patterns
-            "/_next/static/chunks/_sbcListLayout.json",
-            "/_next/data/build-id/sbc/_sbcListLayout.json",
-        ]
-        
-        results = {}
-        successful_data_endpoints = []
-        
-        async with httpx.AsyncClient() as client:
-            # Try different header combinations
-            header_sets = [
-                # Standard browser headers
-                {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Accept": "application/json, text/javascript, */*; q=0.01",
-                    "Referer": "https://www.fut.gg/sbc/",
-                    "X-Requested-With": "XMLHttpRequest"
-                },
-                # API client headers
-                {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Accept": "application/json",
-                    "Content-Type": "application/json"
-                },
-                # Minimal headers (sometimes works when others fail)
-                {
-                    "Accept": "*/*"
-                }
-            ]
-            
-            for endpoint in high_priority_endpoints:
-                endpoint_results = []
-                
-                for i, headers in enumerate(header_sets):
-                    try:
-                        url = f"https://www.fut.gg{endpoint}"
-                        response = await client.get(url, headers=headers, timeout=10)
-                        
-                        result = {
-                            "header_set": i + 1,
-                            "status": response.status_code,
-                            "content_type": response.headers.get("content-type", ""),
-                            "size": len(response.text),
-                            "preview": response.text[:500] + "..." if len(response.text) > 500 else response.text
-                        }
-                        
-                        # Deep analysis for successful responses
-                        if response.status_code == 200:
-                            content = response.text
-                            content_lower = content.lower()
-                            
-                            # Count SBC indicators
-                            sbc_keywords = ["sbc", "challenge", "squad", "rating", "chemistry", "player", "eaid", "reward"]
-                            sbc_score = sum(content_lower.count(keyword) for keyword in sbc_keywords)
-                            result["sbc_score"] = sbc_score
-                            
-                            # Try to parse as JSON
-                            try:
-                                data = json.loads(content)
-                                result["is_valid_json"] = True
-                                result["json_type"] = type(data).__name__
-                                
-                                if isinstance(data, dict):
-                                    result["json_keys"] = list(data.keys())
-                                    
-                                    # Look for SBC data structure
-                                    if "sbcSets" in data or "allSbcs" in data:
-                                        result["contains_sbc_data"] = True
-                                        successful_data_endpoints.append(endpoint)
-                                    
-                                    # Check for nested SBC data
-                                    for key, value in data.items():
-                                        if isinstance(value, list) and value:
-                                            sample = value[0] if isinstance(value[0], dict) else {}
-                                            sample_keys = list(sample.keys()) if isinstance(sample, dict) else []
-                                            if any(sbc_key in sample_keys for sbc_key in ["name", "challengesCount", "eaId"]):
-                                                result["likely_sbc_array"] = True
-                                                result["sample_sbc_keys"] = sample_keys
-                                                successful_data_endpoints.append(endpoint)
-                                
-                                elif isinstance(data, list) and data:
-                                    result["array_length"] = len(data)
-                                    if isinstance(data[0], dict):
-                                        sample_keys = list(data[0].keys())
-                                        result["sample_keys"] = sample_keys
-                                        
-                                        # Check if this looks like SBC data
-                                        if any(key in sample_keys for key in ["name", "challengesCount", "eaId", "url"]):
-                                            result["looks_like_sbc_array"] = True
-                                            successful_data_endpoints.append(endpoint)
-                                
-                            except json.JSONDecodeError:
-                                # Check if it's JavaScript/module content
-                                if content.strip().startswith(("import", "export", "const", "function")):
-                                    result["is_javascript_module"] = True
-                                    
-                                    # Extract any JSON-like data from JS
-                                    json_matches = []
-                                    import re
-                                    json_pattern = r'\{[^{}]*(?:"[^"]*"[^{}]*)*\}'
-                                    matches = re.findall(json_pattern, content)
-                                    for match in matches[:3]:  # First 3 matches
-                                        try:
-                                            parsed = json.loads(match)
-                                            json_matches.append(parsed)
-                                        except:
-                                            continue
-                                    
-                                    if json_matches:
-                                        result["extracted_json"] = json_matches
-                            
-                            # If high SBC score, mark as interesting
-                            if sbc_score > 5:
-                                result["high_sbc_content"] = True
-                                successful_data_endpoints.append(endpoint)
-                        
-                        endpoint_results.append(result)
-                        
-                        # If we got a good response, no need to try other headers
-                        if response.status_code == 200 and (result.get("is_valid_json") or result.get("sbc_score", 0) > 5):
-                            break
-                            
-                    except Exception as e:
-                        endpoint_results.append({
-                            "header_set": i + 1,
-                            "error": str(e),
-                            "status": "failed"
-                        })
-                
-                results[endpoint] = endpoint_results
-        
-        # Remove duplicates from successful endpoints
-        successful_data_endpoints = list(set(successful_data_endpoints))
-        
-        return {
-            "status": "completed",
-            "successful_data_endpoints": successful_data_endpoints,
-            "total_endpoints_tested": len(high_priority_endpoints),
-            "promising_count": len(successful_data_endpoints),
-            "results": results,
-            "recommendation": "These endpoints should be tested for actual SBC data extraction" if successful_data_endpoints else "No direct data endpoints found, may need to reverse engineer the JavaScript modules"
-        }
-        
-    except Exception as e:
-        import traceback
-        return {
-            "status": "error",
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }
-
-@app.get("/debug/full-crawl")
-async def test_full_crawl():
-    """Test a full crawl simulation"""
-    try:
-        import httpx
-        from bs4 import BeautifulSoup
-        
-        async with httpx.AsyncClient() as client:
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            
-            # Get main page
-            response = await client.get("https://www.fut.gg/sbc/", headers=headers, timeout=30)
-            soup = BeautifulSoup(response.text, "html.parser")
-            
-            # Count SBC links
-            sbc_links = soup.select('a[href*="/sbc/"]')
-            unique_sbcs = set()
-            
-            for link in sbc_links:
-                href = link.get('href')
-                if href and href.startswith('/sbc/') and len(href.split('/')) > 3:
-                    unique_sbcs.add(href)
-            
-            return {
-                "status": "success",
-                "count": len(unique_sbcs),
-                "details": f"Found {len(unique_sbcs)} unique SBC pages on the main listing"
-            }
-    
-    except Exception as e:
-        return {
-            "status": "error", 
-            "count": 0,
-            "details": f"Crawl failed: {str(e)}"
-        }
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "database": bool(os.getenv("DATABASE_URL"))}
-
-# Simple solution endpoint for testing
-@app.get("/api/test-solution")  
-def test_solution():
-    return {
-        "solution": {
-            "total_cost": 15000,
-            "rating": 84.2,
-            "chemistry": 100,
-            "players": [
-                {"name": "Yann Sommer", "position": "GK", "rating": 84, "price": 3000},
-                {"name": "Thiago Silva", "position": "CB", "rating": 86, "price": 18000},
-                {"name": "Generic Player", "position": "CM", "rating": 82, "price": 5000}
-            ],
-            "data_source": "Mock data for testing"
-        }
-    }
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
