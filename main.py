@@ -24,6 +24,8 @@ def root():
         .log { background: #f8f9fa; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
         .error { background: #f8d7da; color: #721c24; }
         .success { background: #d4edda; color: #155724; }
+        .warning { background: #fff3cd; color: #856404; }
+        .highlight { background: #e8f5e8; padding: 5px; border-radius: 3px; margin: 5px 0; }
     </style>
 </head>
 <body>
@@ -36,38 +38,11 @@ def root():
                 <button @click="testConnectivity" :disabled="loading">Test fut.gg Connection</button>
                 <div v-if="connectivityResult" class="log" :class="connectivityResult.success ? 'success' : 'error'">
                     {{ connectivityResult.message }}
-                <div class="card">
-                <h3>Step 6: Test JSON API (Based on JavaScript)</h3>
-                <button @click="testApi" :disabled="loading">Test fut.gg APIs</button>
-                <div v-if="apiResult" class="log">
-                    <strong>Status:</strong> {{ apiResult.status }}<br>
-                    <strong>Endpoints Tested:</strong> {{ apiResult.total_endpoints_tested }}<br>
-                    
-                    <div v-if="apiResult.analysis">
-                        <strong>JSON Endpoints Found:</strong> {{ apiResult.analysis.json_endpoints.length }}<br>
-                        <div v-for="endpoint in apiResult.analysis.json_endpoints" :key="endpoint.endpoint" style="margin: 5px 0; background: #e8f5e8; padding: 5px; border-radius: 3px;">
-                            • <strong>{{ endpoint.endpoint }}</strong><br>
-                            Keys: {{ endpoint.keys }}<br>
-                            Preview: {{ endpoint.preview }}
-                        </div>
-                        
-                        <strong>Successful Endpoints:</strong><br>
-                        <div v-for="endpoint in apiResult.analysis.successful_endpoints" :key="endpoint" style="margin: 2px 0;">
-                            • {{ endpoint }}
-                        </div>
-                        
-                        <strong>Suspicious Endpoints:</strong><br>
-                        <div v-for="item in apiResult.analysis.suspicious_endpoints" :key="item.endpoint" style="margin: 5px 0; background: #fff3cd; padding: 5px; border-radius: 3px;">
-                            • <strong>{{ item.endpoint }}</strong> ({{ item.reason }})<br>
-                            Preview: {{ item.preview }}
-                        </div>
-                    </div>
-                    
-                    <div v-if="apiResult.error">
-                        <strong>Error:</strong> {{ apiResult.error }}
+                    <div v-if="connectivityResult.success">
+                        Status Code: {{ connectivityResult.status_code }}<br>
+                        Content Length: {{ connectivityResult.content_length }}
                     </div>
                 </div>
-            </div>
             </div>
             
             <div class="card">
@@ -76,6 +51,7 @@ def root():
                 <div v-if="htmlResult" class="log">
                     <strong>HTML Length:</strong> {{ htmlResult.length }}<br>
                     <strong>Title Found:</strong> {{ htmlResult.title }}<br>
+                    <strong>HTML Tags:</strong> H1={{ htmlResult.h1_tags }}, H2={{ htmlResult.h2_tags }}, H3={{ htmlResult.h3_tags }}<br>
                     <strong>Sample:</strong> {{ htmlResult.sample }}
                 </div>
             </div>
@@ -85,8 +61,11 @@ def root():
                 <button @click="testParsing" :disabled="loading">Test Requirement Extraction</button>
                 <div v-if="parseResult" class="log">
                     <strong>Requirements Found:</strong> {{ parseResult.count }}<br>
+                    <strong>List Items Found:</strong> {{ parseResult.li_count }}<br>
                     <strong>Sample Requirements:</strong><br>
                     <div v-for="req in parseResult.requirements" :key="req">• {{ req }}</div>
+                    <strong>Sample List Items:</strong><br>
+                    <div v-for="item in parseResult.li_samples" :key="item">• {{ item }}</div>
                 </div>
             </div>
             
@@ -95,6 +74,11 @@ def root():
                 <button @click="checkDatabase" :disabled="loading">Check Database</button>
                 <div v-if="dbResult" class="log" :class="dbResult.success ? 'success' : 'error'">
                     {{ dbResult.message }}
+                    <div v-if="dbResult.success">
+                        <strong>SBC Tables:</strong> {{ dbResult.sbc_tables.join(', ') || 'None found' }}<br>
+                        <strong>Player Tables:</strong> {{ dbResult.player_tables.join(', ') || 'None found' }}<br>
+                        <strong>Total Tables:</strong> {{ dbResult.total_tables }}
+                    </div>
                 </div>
             </div>
             
@@ -104,9 +88,11 @@ def root():
                 <div v-if="newParserResult" class="log">
                     <strong>Status:</strong> {{ newParserResult.status }}<br>
                     <strong>SBCs Found:</strong> {{ newParserResult.sbcs_found }}<br>
-                    <strong>Sample SBCs:</strong><br>
-                    <div v-for="sbc in newParserResult.sample_sbcs" :key="sbc.name" style="margin: 5px 0;">
-                        • {{ sbc.name }} ({{ sbc.category }}, {{ sbc.challenge_count }} challenges)
+                    <div v-if="newParserResult.sample_sbcs && newParserResult.sample_sbcs.length > 0">
+                        <strong>Sample SBCs:</strong><br>
+                        <div v-for="sbc in newParserResult.sample_sbcs" :key="sbc.name" class="highlight">
+                            • {{ sbc.name }} ({{ sbc.category }}, {{ sbc.challenge_count }} challenges)
+                        </div>
                     </div>
                     <div v-if="newParserResult.sample_details">
                         <strong>Sample Details:</strong><br>
@@ -117,14 +103,69 @@ def root():
                             - {{ req }}
                         </div>
                     </div>
-                    <div v-if="newParserResult.error">
+                    <div v-if="newParserResult.error" class="error">
                         <strong>Error:</strong> {{ newParserResult.error }}
                     </div>
                 </div>
             </div>
             
             <div class="card">
-                <h3>Step 6: Full Crawl Test</h3>
+                <h3>Step 6: Test JSON API Discovery</h3>
+                <button @click="testApi" :disabled="loading">Test fut.gg APIs</button>
+                <div v-if="apiResult" class="log">
+                    <strong>Status:</strong> {{ apiResult.status }}<br>
+                    <strong>Endpoints Tested:</strong> {{ apiResult.total_endpoints_tested }}<br>
+                    
+                    <div v-if="apiResult.analysis">
+                        <strong>Successful Endpoints:</strong> {{ apiResult.analysis.successful_endpoints.length }}<br>
+                        <div v-for="endpoint in apiResult.analysis.successful_endpoints" :key="endpoint" style="margin: 2px 0;">
+                            • {{ endpoint }}
+                        </div>
+                        
+                        <div v-if="apiResult.analysis.json_endpoints && apiResult.analysis.json_endpoints.length > 0">
+                            <strong>JSON Endpoints Found:</strong><br>
+                            <div v-for="endpoint in apiResult.analysis.json_endpoints" :key="endpoint.endpoint" class="highlight">
+                                • <strong>{{ endpoint.endpoint }}</strong><br>
+                                Keys: {{ endpoint.keys }}<br>
+                                Preview: {{ endpoint.preview }}
+                            </div>
+                        </div>
+                        
+                        <div v-if="apiResult.analysis.promising_endpoints && apiResult.analysis.promising_endpoints.length > 0">
+                            <strong>Promising Endpoints:</strong><br>
+                            <div v-for="endpoint in apiResult.analysis.promising_endpoints" :key="endpoint" class="success">
+                                • {{ endpoint }}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div v-if="apiResult.error" class="error">
+                        <strong>Error:</strong> {{ apiResult.error }}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>Step 7: Targeted API Test</h3>
+                <button @click="testTargetedApi" :disabled="loading">Test High-Priority Endpoints</button>
+                <div v-if="targetedResult" class="log">
+                    <strong>Status:</strong> {{ targetedResult.status }}<br>
+                    <strong>Promising Count:</strong> {{ targetedResult.promising_count }}<br>
+                    <div v-if="targetedResult.successful_data_endpoints && targetedResult.successful_data_endpoints.length > 0">
+                        <strong>Successful Data Endpoints:</strong><br>
+                        <div v-for="endpoint in targetedResult.successful_data_endpoints" :key="endpoint" class="success">
+                            • {{ endpoint }}
+                        </div>
+                    </div>
+                    <strong>Recommendation:</strong> {{ targetedResult.recommendation }}
+                    <div v-if="targetedResult.error" class="error">
+                        <strong>Error:</strong> {{ targetedResult.error }}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>Step 8: Full Crawl Test</h3>
                 <button @click="testFullCrawl" :disabled="loading">Run Test Crawl</button>
                 <div v-if="crawlResult" class="log">
                     <strong>Status:</strong> {{ crawlResult.status }}<br>
@@ -153,7 +194,6 @@ def root():
                     newParserResult: null,
                     apiResult: null,
                     targetedResult: null,
-                    networkResult: null,
                     crawlResult: null
                 }
             },
@@ -167,26 +207,7 @@ def root():
                         this.connectivityResult = { success: false, message: e.message };
                     }
                     this.loading = false;
-                async testNetworkAnalysis() {
-                    this.loading = true;
-                    try {
-                        const res = await axios.get('/debug/network-analysis');
-                        this.networkResult = res.data;
-                    } catch (e) {
-                        this.networkResult = { status: 'error', error: e.message };
-                    }
-                    this.loading = false;
                 },
-                async testFullCrawl() {
-                    this.loading = true;
-                    try {
-                        const res = await axios.get('/debug/full-crawl');
-                        this.crawlResult = res.data;
-                    } catch (e) {
-                        this.crawlResult = { status: 'error', details: e.message };
-                    }
-                    this.loading = false;
-                }
                 async testHtmlFetch() {
                     this.loading = true;
                     try {
@@ -227,6 +248,26 @@ def root():
                     }
                     this.loading = false;
                 },
+                async testApi() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/api-test');
+                        this.apiResult = res.data;
+                    } catch (e) {
+                        this.apiResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
+                },
+                async testTargetedApi() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/targeted-api-test');
+                        this.targetedResult = res.data;
+                    } catch (e) {
+                        this.targetedResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
+                },
                 async testFullCrawl() {
                     this.loading = true;
                     try {
@@ -246,6 +287,42 @@ def root():
 </body>
 </html>
     """)
+
+def analyze_api_results(results):
+    """Analyze API test results to identify promising endpoints"""
+    json_endpoints = []
+    successful_endpoints = []
+    suspicious_endpoints = []
+    
+    for endpoint, result in results.items():
+        if isinstance(result, dict):
+            # Check if endpoint was successful
+            if result.get("status") == 200:
+                successful_endpoints.append(endpoint)
+                
+                # Check if it's JSON
+                if result.get("is_json"):
+                    json_endpoints.append({
+                        "endpoint": endpoint,
+                        "keys": result.get("json_keys", []),
+                        "preview": result.get("json_preview", "")[:100]
+                    })
+                
+                # Check for suspicious but potentially useful endpoints
+                if result.get("content_length", 0) > 1000 and "sbc" in result.get("preview", "").lower():
+                    suspicious_endpoints.append({
+                        "endpoint": endpoint,
+                        "reason": "Large content with SBC references",
+                        "preview": result.get("preview", "")[:100]
+                    })
+    
+    return {
+        "json_endpoints": json_endpoints,
+        "successful_endpoints": successful_endpoints,
+        "suspicious_endpoints": suspicious_endpoints,
+        "total_successful": len(successful_endpoints),
+        "total_json": len(json_endpoints)
+    }
 
 # Debug endpoints
 @app.get("/debug/connectivity")
@@ -385,10 +462,8 @@ async def debug_database():
 async def test_new_parser():
     """Test the new fut.gg parser based on actual HTML structure"""
     try:
-        # Import the new parser
         import httpx
         from bs4 import BeautifulSoup
-        from datetime import datetime, timezone, timedelta
         import re
         
         async def fetch_and_parse_futgg():
@@ -498,6 +573,12 @@ async def test_new_parser():
         
     except Exception as e:
         import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
 @app.get("/debug/api-test")
 async def test_futgg_api():
     """Test if fut.gg has accessible JSON APIs based on the JavaScript"""
@@ -548,29 +629,9 @@ async def test_futgg_api():
                 except Exception as e:
                     results[endpoint] = {"error": str(e)}
         
-        # Also test some common Next.js/React API patterns
-        nextjs_patterns = [
-            "/_next/data/buildId/sbc.json",
-            "/api/trpc/sbc.list",
-            "/.netlify/functions/sbc-list",
-            "/graphql"
-        ]
-        
-        for pattern in nextjs_patterns:
-            try:
-                full_url = f"https://www.fut.gg{pattern}"
-                response = await client.get(full_url, headers=headers, timeout=5)
-                results[f"nextjs_{pattern}"] = {
-                    "status": response.status_code,
-                    "content_type": response.headers.get("content-type", ""),
-                    "preview": response.text[:100]
-                }
-            except:
-                results[f"nextjs_{pattern}"] = {"error": "Failed or timeout"}
-        
         return {
             "status": "completed",
-            "total_endpoints_tested": len(api_endpoints) + len(nextjs_patterns),
+            "total_endpoints_tested": len(api_endpoints),
             "results": results,
             "analysis": analyze_api_results(results)
         }
@@ -583,149 +644,6 @@ async def test_futgg_api():
             "traceback": traceback.format_exc()
         }
 
-@app.get("/debug/network-analysis")
-async def analyze_network_requests():
-    """Analyze what network requests fut.gg makes by examining their JavaScript patterns"""
-    try:
-        import httpx
-        import json
-        
-        # Test various API patterns suggested by the SbcSet component
-        potential_endpoints = [
-            # Direct data endpoints
-            "/api/sbc/sets",
-            "/api/sbc/list", 
-            "/api/sbcs/active",
-            "/sbc/api/data",
-            "/data/sbc-sets.json",
-            
-            # Next.js API routes
-            "/api/sbc-sets",
-            "/_next/static/chunks/sbc-data.json",
-            
-            # Internal API patterns
-            "/internal/sbc/list",
-            "/v1/sbc/sets",
-            "/graphql",
-            
-            # Check if they expose any build manifest or data
-            "/_next/static/chunks/webpack.json",
-            "/manifest.json",
-            "/.well-known/sbc-data",
-            
-            # Try to find the actual data source
-            "/sbc/_sbcListLayout",  # From original JS
-            "/sbc/_layout",
-            "/sbc/data.json"
-        ]
-        
-        results = {}
-        promising_endpoints = []
-        
-        async with httpx.AsyncClient() as client:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "application/json, */*",
-                "Referer": "https://www.fut.gg/sbc/",
-                "X-Requested-With": "XMLHttpRequest"  # Sometimes needed for API endpoints
-            }
-            
-            for endpoint in potential_endpoints:
-                try:
-                    url = f"https://www.fut.gg{endpoint}"
-                    response = await client.get(url, headers=headers, timeout=8)
-                    
-                    content_type = response.headers.get("content-type", "").lower()
-                    text = response.text
-                    
-                    result = {
-                        "status": response.status_code,
-                        "content_type": content_type,
-                        "size": len(text),
-                        "preview": text[:300] + "..." if len(text) > 300 else text
-                    }
-                    
-                    # Analyze if this looks like SBC data
-                    if response.status_code == 200:
-                        text_lower = text.lower()
-                        sbc_indicators = 0
-                        
-                        # Count SBC-related keywords
-                        keywords = ["sbc", "challenge", "squad", "rating", "chemistry", "player", "reward", "eaid"]
-                        for keyword in keywords:
-                            sbc_indicators += text_lower.count(keyword)
-                        
-                        result["sbc_score"] = sbc_indicators
-                        
-                        # Try to parse as JSON
-                        if "json" in content_type or text.strip().startswith(("{", "[")):
-                            try:
-                                data = json.loads(text)
-                                result["is_json"] = True
-                                result["json_type"] = type(data).__name__
-                                
-                                if isinstance(data, dict):
-                                    result["json_keys"] = list(data.keys())[:10]  # First 10 keys
-                                    
-                                    # Look for SBC-like structure
-                                    if any(key in str(data.keys()).lower() for key in ["sbc", "challenge", "set"]):
-                                        result["likely_sbc_data"] = True
-                                        promising_endpoints.append(endpoint)
-                                        
-                                elif isinstance(data, list) and data:
-                                    result["array_length"] = len(data)
-                                    if isinstance(data[0], dict):
-                                        result["sample_keys"] = list(data[0].keys())[:10]
-                                        
-                                        # Check if array items look like SBCs
-                                        sample_str = str(data[0]).lower()
-                                        if any(keyword in sample_str for keyword in ["sbc", "challenge", "rating"]):
-                                            result["likely_sbc_data"] = True
-                                            promising_endpoints.append(endpoint)
-                                
-                            except json.JSONDecodeError:
-                                result["json_parse_error"] = "Invalid JSON"
-                        
-                        # If high SBC score, mark as promising
-                        if sbc_indicators > 10:
-                            result["high_sbc_score"] = True
-                            promising_endpoints.append(endpoint)
-                    
-                    results[endpoint] = result
-                    
-                except Exception as e:
-                    results[endpoint] = {"error": str(e), "status": "failed"}
-        
-        # Additional analysis
-        analysis = {
-            "total_tested": len(potential_endpoints),
-            "successful_responses": len([r for r in results.values() if r.get("status") == 200]),
-            "json_responses": len([r for r in results.values() if r.get("is_json")]),
-            "promising_endpoints": promising_endpoints,
-            "recommendations": []
-        }
-        
-        # Generate recommendations
-        if promising_endpoints:
-            analysis["recommendations"].append(f"Found {len(promising_endpoints)} promising endpoints with SBC data")
-        
-        json_endpoints = [ep for ep, r in results.items() if r.get("is_json")]
-        if json_endpoints:
-            analysis["recommendations"].append(f"JSON endpoints found: {json_endpoints[:3]}")
-        
-        high_score_endpoints = [ep for ep, r in results.items() if r.get("high_sbc_score")]
-        if high_score_endpoints:
-            analysis["recommendations"].append(f"High SBC content score: {high_score_endpoints}")
-        
-        return {
-            "status": "completed",
-            "analysis": analysis,
-            "detailed_results": results,
-            "next_steps": "Test the promising endpoints for actual SBC data extraction"
-        }
-        
-    except Exception as e:
-        import traceback
 @app.get("/debug/targeted-api-test")
 async def test_targeted_apis():
     """Test specific API endpoints discovered from JavaScript analysis"""
@@ -903,6 +821,42 @@ async def test_targeted_apis():
             "status": "error",
             "error": str(e),
             "traceback": traceback.format_exc()
+        }
+
+@app.get("/debug/full-crawl")
+async def test_full_crawl():
+    """Test a full crawl simulation"""
+    try:
+        import httpx
+        from bs4 import BeautifulSoup
+        
+        async with httpx.AsyncClient() as client:
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            
+            # Get main page
+            response = await client.get("https://www.fut.gg/sbc/", headers=headers, timeout=30)
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # Count SBC links
+            sbc_links = soup.select('a[href*="/sbc/"]')
+            unique_sbcs = set()
+            
+            for link in sbc_links:
+                href = link.get('href')
+                if href and href.startswith('/sbc/') and len(href.split('/')) > 3:
+                    unique_sbcs.add(href)
+            
+            return {
+                "status": "success",
+                "count": len(unique_sbcs),
+                "details": f"Found {len(unique_sbcs)} unique SBC pages on the main listing"
+            }
+    
+    except Exception as e:
+        return {
+            "status": "error", 
+            "count": 0,
+            "details": f"Crawl failed: {str(e)}"
         }
 
 @app.get("/health")
