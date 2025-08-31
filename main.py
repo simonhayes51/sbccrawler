@@ -3,7 +3,19 @@ from fastapi.responses import HTMLResponse
 import os
 import asyncio
 
+# Import the solution API router
+try:
+    from solution_api import router as solution_router
+    SOLUTION_API_AVAILABLE = True
+except ImportError:
+    SOLUTION_API_AVAILABLE = False
+    print("⚠️ Solution API not available - some endpoints will be disabled")
+
 app = FastAPI(title="FUT SBC Tracker")
+
+# Include the solution API router if available
+if SOLUTION_API_AVAILABLE:
+    app.include_router(solution_router)
 
 @app.get("/")
 def root():
