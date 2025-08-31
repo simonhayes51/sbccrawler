@@ -38,15 +38,43 @@ class SolutionExtractor:
             await self.browser.close()
 
     def extract_player_ids_from_html(self, html: str) -> List[str]:
-        """Extract player IDs from webp image URLs in HTML"""
-        # Pattern to match the webp URLs and extract the player ID
-        # Matches: 25-{player_id}.{hash}.webp
-        pattern = r'25-(\d+)\.[\w]+\.webp'
+        """Extract player IDs from webp image URLs in HTML with multiple patterns"""
+        print(f"  🔍 Analyzing HTML content ({len(html)} characters)")
         
-        matches = re.findall(pattern, html)
-        unique_ids = list(set(matches))  # Remove duplicates
+        # Multiple patterns to try
+        patterns = [
+            r'25-(\d+)\.[\w]+\.webp',           # Original webp pattern
+            r'src="[^"]*25-(\d+)[^"]*\.webp',   # More specific src pattern
+            r'25-(\d{6,})\.[\w]+',              # General pattern with 6+ digits  
+            r'/25-(\d+)\.[\w]+\.',              # Path-based pattern
+            r'25-(\d{8,})',                     # 8+ digit pattern (more specific)
+        ]
         
-        print(f"  🔍 Found {len(unique_ids)} unique player IDs in HTML")
+        all_matches = set()
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, html, re.IGNORECASE)
+            if matches:
+                print(f"    Pattern '{pattern}' found {len(matches)} matches")
+                all_matches.update(matches)
+        
+        # Filter out obviously invalid IDs (too short/long)
+        valid_matches = []
+        for match in all_matches:
+            if 6 <= len(match) <= 12 and match.isdigit():  # Reasonable ID length
+                valid_matches.append(match)
+        
+        unique_ids = list(set(valid_matches))
+        print(f"  ✅ Found {len(unique_ids)} unique valid player IDs")
+        
+        if unique_ids:
+            print(f"    Sample IDs: {unique_ids[:3]}")
+        else:
+            print("    ❌ No valid player IDs found")
+            # Debug: show some HTML content
+            sample_html = html[:500].replace('\n', ' ')
+            print(f"    HTML sample: {sample_html}...")
+        
         return unique_ids
 
     async def get_solution_players_static(self, solution_url: str) -> List[str]:
