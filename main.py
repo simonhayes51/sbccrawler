@@ -48,39 +48,36 @@ def root():
             </div>
 
             <div class="card">
-                <h3>Step 2: Test JavaScript Analysis</h3>
-                <button @click="testJsAnalysis" :disabled="loading">Analyze Squad Builder JavaScript</button>
-                <div v-if="jsAnalysisResult" class="log">
-                    <strong>Status:</strong> {{ jsAnalysisResult.status }}<br>
-                    <div v-if="jsAnalysisResult.status === 'success'">
-                        <strong>JS File Size:</strong> {{ jsAnalysisResult.js_file_size }}<br>
-                        
-                        <div v-if="jsAnalysisResult.api_endpoints && Object.keys(jsAnalysisResult.api_endpoints).length > 0">
-                            <strong>API Endpoints Found:</strong><br>
-                            <div v-for="(endpoints, pattern) in jsAnalysisResult.api_endpoints" :key="pattern" class="highlight">
-                                <strong>{{ pattern }}:</strong><br>
-                                <div v-for="endpoint in endpoints" :key="endpoint" style="margin-left: 20px;">
-                                    • {{ endpoint }}
+                <h3>Step 2: Inspect DOM Structure</h3>
+                <button @click="inspectDOM" :disabled="loading">Analyze Real HTML Structure</button>
+                <div v-if="domResult" class="log">
+                    <strong>Status:</strong> {{ domResult.status || 'success' }}<br>
+                    <div v-if="domResult.potential_requirements">
+                        <strong>Potential Requirements Found:</strong> {{ domResult.potential_requirements.length }}<br>
+                        <div v-for="req in domResult.potential_requirements.slice(0, 5)" :key="req.text" class="highlight">
+                            <strong>Text:</strong> {{ req.text }}<br>
+                            <strong>Parent:</strong> {{ req.parent_tag }} (class: {{ req.parent_class }})
+                        </div>
+                    </div>
+                    
+                    <div v-if="domResult.selector_tests">
+                        <strong>Selector Test Results:</strong><br>
+                        <div v-for="(result, selector) in domResult.selector_tests" :key="selector">
+                            <div v-if="result.dynamic_matches > 0" class="success">
+                                <strong>✅ {{ selector }}:</strong> {{ result.dynamic_matches }} matches<br>
+                                <div v-if="result.sample_dynamic && result.sample_dynamic.length > 0">
+                                    Sample: {{ result.sample_dynamic[0] }}
                                 </div>
                             </div>
                         </div>
-                        
-                        <div v-if="jsAnalysisResult.sbc_references && Object.keys(jsAnalysisResult.sbc_references).length > 0">
-                            <strong>SBC References:</strong><br>
-                            <div v-for="(refs, pattern) in jsAnalysisResult.sbc_references" :key="pattern" class="success">
-                                <strong>{{ pattern }}:</strong> {{ refs.join(', ') }}
-                            </div>
-                        </div>
-                        
-                        <strong>Recommendation:</strong> {{ jsAnalysisResult.recommendation }}
                     </div>
                     
-                    <div v-if="jsAnalysisResult.error" class="error">
-                        <strong>Error:</strong> {{ jsAnalysisResult.error }}
+                    <div v-if="domResult.error" class="error">
+                        <strong>Error:</strong> {{ domResult.error }}
                     </div>
                 </div>
             </div>
-            
+
             <div class="card">
                 <h3>Step 3: Test Enhanced Crawler</h3>
                 <button @click="testEnhancedCrawler" :disabled="loading">Test Enhanced Crawler (Browser + Static)</button>
@@ -189,7 +186,7 @@ def root():
                 return {
                     loading: false,
                     connectivityResult: null,
-                    jsAnalysisResult: null,
+                    domResult: null,
                     enhancedCrawlerResult: null,
                     singleSbcResult: null,
                     productionCrawlResult: null
@@ -206,13 +203,13 @@ def root():
                     }
                     this.loading = false;
                 },
-                async testJsAnalysis() {
+                async inspectDOM() {
                     this.loading = true;
                     try {
-                        const res = await axios.get('/debug/analyze-squad-builder-js');
-                        this.jsAnalysisResult = res.data;
+                        const res = await axios.get('/debug/inspect-dom');
+                        this.domResult = res.data;
                     } catch (e) {
-                        this.jsAnalysisResult = { status: 'error', error: e.message };
+                        this.domResult = { status: 'error', error: e.message };
                     }
                     this.loading = false;
                 },
@@ -239,7 +236,7 @@ def root():
                 async runEnhancedCrawl() {
                     this.loading = true;
                     try {
-                        const res = await axios.get('/debug/run-enhanced-crawl', { timeout: 300000 }); // 5 minutes
+                        const res = await axios.get('/debug/run-enhanced-crawl', { timeout: 300000 });
                         this.productionCrawlResult = res.data;
                     } catch (e) {
                         this.productionCrawlResult = { status: 'error', error: e.message };
@@ -275,78 +272,148 @@ async def debug_connectivity():
             "message": f"Connection failed: {str(e)}"
         }
 
-@app.get("/debug/analyze-squad-builder-js")
-async def analyze_squad_builder_js():
-    """Analyze the Squad Builder JavaScript for API patterns"""
+@app.get("/debug/inspect-dom")
+async def inspect_dom_structure():
+    """Deep inspect the actual DOM structure of fut.gg SBC pages"""
+    
     try:
-        # The minified JavaScript content from the document
-        js_content = """import{n as e,o as s,R as a,Z as i,r as t,_ as l,$ as o,a0 as n,Q as r,l as d,M as c,v as u,y as m,a1 as v,j as p,x as h,U as x,a2 as b,a3 as y}from"./vendor.2.-HZvaLpMr.js";import{S as g,w as j,x as C,y as f,F as _,z as N,A as I,B as q,E as k,l as S,G as P,H as T,I as A,J as E,f as F,T as L,K as R,M,N as D,O,Q as w,U,W as z,X as B,Y as V,Z as H,_ as G,$ as Y,a0 as $,a1 as K,a2 as Q,a3 as W,a4 as J,u as Z,a5 as X,a6 as ee,a7 as se,a8 as ae,a9 as ie,aa as te,ab as le,ac as oe,ad as ne,ae as re,af as de,ag as ce,ah as ue,ai as me,aj as ve,ak as pe,al as he,am as xe,an as be,ao as ye,ap as ge,aq as je,ar as Ce,as as fe,at as _e,au as Ne,av as Ie,aw as qe,ax as ke,ay as Se,az as Pe,aA as Te,aB as Ae,aC as Ee,aD as Fe,h as Le,aE as Re,aF as Me,aG as De,aH as Oe,aI as we,aJ as Ue,aK as ze,aL as Be,aM as Ve,aN as He,aO as Ge,aP as Ye,aQ as $e,n as Ke,L as Qe}from"./apps.2.-D9Nv3rHf.js";import{C as We,a as Je,T as Ze,I as Xe,S as es,b as ss,E as as,u as is,s as ts}from"./EllipsisSolidSvg.2.-orzIb8WP.js"""
+        from playwright.async_api import async_playwright
+        import httpx
+        from bs4 import BeautifulSoup
         
-        import re
+        test_url = "https://www.fut.gg/sbc/players/25-1253-georgia-stanway/"
         
-        # Look for API endpoint patterns in the minified JS
-        api_patterns = [
-            r'"/api/[^"]*"',
-            r'"/sbc/[^"]*"', 
-            r'"https://[^"]*api[^"]*"',
-            r'fetch\s*\([^)]*\)',
-            r'axios\.[^(]*\([^)]*\)',
-            r'useQuery\([^)]*\)',
-            r'useLazyQuery\([^)]*\)',
-            r'useGet[^(]*Query\(',
-        ]
+        # First, get static HTML to compare
+        async with httpx.AsyncClient() as client:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+            }
+            response = await client.get(test_url, headers=headers, timeout=30)
+            static_html = response.text
         
-        found_endpoints = {}
-        for pattern in api_patterns:
-            matches = re.findall(pattern, js_content, re.IGNORECASE)
-            if matches:
-                # Clean up matches and remove duplicates
-                cleaned_matches = list(set([match.strip('"') for match in matches]))
-                found_endpoints[pattern] = cleaned_matches[:10]  # First 10 matches
+        static_soup = BeautifulSoup(static_html, "html.parser")
         
-        # Look for specific SBC-related patterns
-        sbc_patterns = [
-            r'"sbc[^"]*"',
-            r'"challenge[^"]*"',
-            r'"requirement[^"]*"',
-            r'"squad[^"]*"',
-            r'getSquad[^(]*\(',
-            r'getSbc[^(]*\(',
-            r'useGetSbc[^(]*Query\(',
-            r'useGetSquad[^(]*Query\(',
-        ]
-        
-        sbc_references = {}
-        for pattern in sbc_patterns:
-            matches = re.findall(pattern, js_content, re.IGNORECASE)
-            if matches:
-                cleaned_matches = list(set([match.strip('"') for match in matches]))
-                sbc_references[pattern] = cleaned_matches[:5]
-        
-        # Look for GraphQL or API query patterns
-        query_patterns = [
-            r'query\s+[A-Z][a-zA-Z]*\s*{[^}]*}',
-            r'mutation\s+[A-Z][a-zA-Z]*\s*{[^}]*}',
-            r'gql`[^`]*`',
-        ]
-        
-        queries = {}
-        for pattern in query_patterns:
-            matches = re.findall(pattern, js_content, re.IGNORECASE | re.DOTALL)
-            if matches:
-                queries[pattern] = matches[:3]
-        
-        return {
-            "status": "success",
-            "js_file_size": len(js_content),
-            "api_endpoints": found_endpoints,
-            "sbc_references": sbc_references,
-            "graphql_queries": queries,
-            "recommendation": "Check the api_endpoints for actual data fetching URLs"
-        }
-        
+        # Now get dynamic content with browser
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            
+            await page.goto(test_url, wait_until='networkidle', timeout=30000)
+            await page.wait_for_timeout(3000)  # Wait for any dynamic content
+            
+            # Get the full HTML after JavaScript execution
+            dynamic_html = await page.content()
+            dynamic_soup = BeautifulSoup(dynamic_html, "html.parser")
+            
+            # Find all possible requirement containers
+            debug_info = {
+                "test_url": test_url,
+                "static_analysis": {},
+                "dynamic_analysis": {},
+                "selector_tests": {}
+            }
+            
+            # Test our current selectors on both versions
+            current_selectors = [
+                'div.bg-gray-600.rounded-lg.p-1',
+                'div.bg-gray-600 ul.flex.flex-col.gap-1 li.text-xs',
+                'ul.flex.flex-col.gap-1 li.text-xs',
+                'li.text-xs'
+            ]
+            
+            for selector in current_selectors:
+                static_matches = len(static_soup.select(selector))
+                dynamic_matches = len(dynamic_soup.select(selector))
+                
+                debug_info["selector_tests"][selector] = {
+                    "static_matches": static_matches,
+                    "dynamic_matches": dynamic_matches,
+                    "sample_static": [],
+                    "sample_dynamic": []
+                }
+                
+                # Get sample text from matches
+                for elem in static_soup.select(selector)[:3]:
+                    text = elem.get_text(strip=True)
+                    if text:
+                        debug_info["selector_tests"][selector]["sample_static"].append(text[:100])
+                
+                for elem in dynamic_soup.select(selector)[:3]:
+                    text = elem.get_text(strip=True)
+                    if text:
+                        debug_info["selector_tests"][selector]["sample_dynamic"].append(text[:100])
+            
+            # Look for ANY elements that might contain requirements
+            requirement_keywords = ['min', 'max', 'exactly', 'chemistry', 'rating', 'players', 'team', 'club', 'league', 'nation']
+            
+            # Search through all text elements for requirement-like content
+            all_elements = dynamic_soup.find_all(text=True)
+            potential_requirements = []
+            
+            for text_node in all_elements:
+                text = text_node.strip()
+                if (len(text) > 10 and len(text) < 200 and 
+                    any(keyword in text.lower() for keyword in requirement_keywords) and
+                    any(char.isdigit() for char in text)):
+                    
+                    # Get the parent element info
+                    parent = text_node.parent
+                    parent_info = {
+                        "text": text,
+                        "parent_tag": parent.name if parent else None,
+                        "parent_class": parent.get('class') if parent and parent.get('class') else None,
+                        "parent_html": str(parent)[:200] + "..." if parent else None
+                    }
+                    potential_requirements.append(parent_info)
+            
+            debug_info["potential_requirements"] = potential_requirements[:10]  # First 10 matches
+            
+            # Look for common SBC structure patterns
+            structure_selectors = [
+                'div[class*="challenge"]',
+                'div[class*="squad"]', 
+                'div[class*="requirement"]',
+                'div[class*="sbc"]',
+                'div[class*="gray"]',
+                'ul[class*="flex"]',
+                'li[class*="text"]',
+                'div.rounded',
+                'div.p-1',
+                'div.p-2',
+                'div.p-4'
+            ]
+            
+            for selector in structure_selectors:
+                matches = await page.locator(selector).count()
+                if matches > 0:
+                    debug_info["selector_tests"][f"structure_{selector}"] = {
+                        "dynamic_matches": matches,
+                        "sample_dynamic": []
+                    }
+                    
+                    # Get sample content
+                    elements = await page.locator(selector).all()
+                    for i, elem in enumerate(elements[:2]):
+                        try:
+                            text_content = await elem.text_content()
+                            if text_content and len(text_content.strip()) > 20:
+                                debug_info["selector_tests"][f"structure_{selector}"]["sample_dynamic"].append(
+                                    text_content.strip()[:150] + "..."
+                                )
+                        except:
+                            pass
+            
+            await browser.close()
+            
+            return debug_info
+            
     except Exception as e:
-        return {"status": "error", "error": str(e)}
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 
 @app.get("/debug/test-enhanced-crawler")
 async def test_enhanced_crawler():
