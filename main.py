@@ -24,7 +24,7 @@ def root():
 <html>
 <head>
     <title>FUT SBC Debug</title>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
     <style>
         body { font-family: system-ui; margin: 20px; background: #f0f2f5; }
@@ -40,10 +40,11 @@ def root():
         .success { background: #d4edda; color: #155724; }
         .warning { background: #fff3cd; color: #856404; }
         .highlight { background: #e8f5e8; padding: 5px; border-radius: 3px; margin: 5px 0; }
+        [v-cloak] { display: none; }
     </style>
 </head>
 <body>
-    <div id="app">
+    <div id="app" v-cloak>
         <div class="container">
             <h1>🔧 FUT SBC Debug Tool</h1>
             
@@ -64,7 +65,7 @@ def root():
                 <button @click="inspectDOM" :disabled="loading">Analyze Real HTML Structure</button>
                 <div v-if="domResult" class="log">
                     <strong>Status:</strong> {{ domResult.status || 'success' }}<br>
-                    <div v-if="domResult.potential_requirements">
+                    <div v-if="domResult.potential_requirements && domResult.potential_requirements.length > 0">
                         <strong>Potential Requirements Found:</strong> {{ domResult.potential_requirements.length }}<br>
                         <div v-for="req in domResult.potential_requirements.slice(0, 5)" :key="req.text" class="highlight">
                             <strong>Text:</strong> {{ req.text }}<br>
@@ -166,7 +167,51 @@ def root():
             </div>
 
             <div class="card">
-                <h3>Step 6: Test Solution Extraction</h3>
+                <h3>Step 5A: Test Raw HTML Extraction</h3>
+                <button @click="testRawHtmlExtraction" :disabled="loading">Test Pattern Matching on Raw HTML</button>
+                <div v-if="rawHtmlResult" class="log">
+                    <strong>Status:</strong> {{ rawHtmlResult.status }}<br>
+                    <div v-if="rawHtmlResult.status === 'success'">
+                        <strong>Test URL:</strong> {{ rawHtmlResult.test_url }}<br>
+                        <strong>HTML Length:</strong> {{ rawHtmlResult.html_length.toLocaleString() }} chars<br>
+                        
+                        <div class="highlight">
+                            <strong>WebP Pattern Matches:</strong> {{ rawHtmlResult.webp_pattern_matches.count }}<br>
+                            <div v-if="rawHtmlResult.webp_pattern_matches.player_ids.length > 0">
+                                Player IDs: {{ rawHtmlResult.webp_pattern_matches.player_ids.join(', ') }}
+                            </div>
+                        </div>
+                        
+                        <div class="highlight">
+                            <strong>Image Src Matches:</strong> {{ rawHtmlResult.img_src_matches.count }}<br>
+                            <div v-if="rawHtmlResult.img_src_matches.player_ids.length > 0">
+                                Player IDs: {{ rawHtmlResult.img_src_matches.player_ids.join(', ') }}
+                            </div>
+                        </div>
+                        
+                        <div class="highlight">
+                            <strong>General 25- Matches:</strong> {{ rawHtmlResult.general_25_matches.count }}<br>
+                            <div v-if="rawHtmlResult.general_25_matches.player_ids.length > 0">
+                                Player IDs: {{ rawHtmlResult.general_25_matches.player_ids.slice(0, 10).join(', ') }}
+                            </div>
+                        </div>
+                        
+                        <div class="warning" style="margin-top: 10px;">
+                            <strong>HTML Sample (first 500 chars):</strong><br>
+                            <div style="font-size: 10px; max-height: 100px; overflow-y: auto;">
+                                {{ rawHtmlResult.html_sample.substring(0, 500) }}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div v-if="rawHtmlResult.error" class="error">
+                        <strong>Error:</strong> {{ rawHtmlResult.error }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Step 5B: Test Solution Extraction</h3>
                 <button @click="testSolutionExtraction" :disabled="loading">Test Player ID Extraction from Solutions</button>
                 <div v-if="solutionResult" class="log">
                     <strong>Status:</strong> {{ solutionResult.status }}<br>
@@ -183,7 +228,7 @@ def root():
                         <div v-if="solutionResult.sample_players" class="success">
                             <strong>Sample Players from Database:</strong><br>
                             <div v-for="player in solutionResult.sample_players" :key="player.card_id" style="margin-left: 20px;">
-                                • {{ player.name }} ({{ player.rating }} OVR, {{ player.position }}) - {{ player.price.toLocaleString() }} coins
+                                • {{ player.name }} ({{ player.rating }} OVR, {{ player.position }}) - {{ player.price ? player.price.toLocaleString() : 'No price' }} coins
                             </div>
                         </div>
                         
@@ -206,7 +251,7 @@ def root():
             </div>
 
             <div class="card">
-                <h3>Step 7: Run Production Crawl</h3>
+                <h3>Step 6: Run Production Crawl</h3>
                 <button @click="runEnhancedCrawl" :disabled="loading" class="warning-button">Run Full Enhanced Crawl & Store in Database</button>
                 <div v-if="productionCrawlResult" class="log">
                     <strong>Status:</strong> {{ productionCrawlResult.status }}<br>
@@ -225,6 +270,107 @@ def root():
             </div>
             
             <div v-if="loading" style="text-align: center; margin: 20px;">
+                <div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #f3f3f3; border-top: 2px solid #007bff; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+                <p>Loading...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+        createApp({
+            data() {
+                return {
+                    loading: false,
+                    connectivityResult: null,
+                    domResult: null,
+                    enhancedCrawlerResult: null,
+                    singleSbcResult: null,
+                    rawHtmlResult: null,
+                    solutionResult: null,
+                    productionCrawlResult: null
+                }
+            },
+            methods: {
+                async testConnectivity() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/connectivity');
+                        this.connectivityResult = res.data;
+                    } catch (e) {
+                        this.connectivityResult = { success: false, message: e.message };
+                    }
+                    this.loading = false;
+                },
+                async inspectDOM() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/inspect-dom');
+                        this.domResult = res.data;
+                    } catch (e) {
+                        this.domResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
+                },
+                async testEnhancedCrawler() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/test-enhanced-crawler');
+                        this.enhancedCrawlerResult = res.data;
+                    } catch (e) {
+                        this.enhancedCrawlerResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
+                },
+                async testSingleSbcEnhanced() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/test-single-sbc-enhanced');
+                        this.singleSbcResult = res.data;
+                    } catch (e) {
+                        this.singleSbcResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
+                },
+                async testRawHtmlExtraction() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/test-raw-html-extraction');
+                        this.rawHtmlResult = res.data;
+                    } catch (e) {
+                        this.rawHtmlResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
+                },
+                async testSolutionExtraction() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/test-solution-extraction');
+                        this.solutionResult = res.data;
+                    } catch (e) {
+                        this.solutionResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
+                },
+                async runEnhancedCrawl() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/run-enhanced-crawl', { timeout: 300000 });
+                        this.productionCrawlResult = res.data;
+                    } catch (e) {
+                        this.productionCrawlResult = { status: 'error', error: e.message };
+                    }
+                    this.loading = false;
+                }
+            }
+        }).mount('#app');
+    </script>
+    <style>
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</body>
+</html>
+    """)<div v-if="loading" style="text-align: center; margin: 20px;">
                 <div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #f3f3f3; border-top: 2px solid #007bff; border-radius: 50%; animation: spin 1s linear infinite;"></div>
                 <p>Loading...</p>
             </div>
@@ -627,58 +773,200 @@ async def run_enhanced_crawl():
 
 @app.get("/debug/test-solution-extraction")
 async def test_solution_extraction():
-    """Test extracting player IDs from solution pages"""
+    """Test extracting player IDs from solution pages with better debugging"""
     try:
         from solution_extractor import SolutionExtractor, get_player_data_from_database
         from db import get_pool
         
-        test_solution_url = "https://www.fut.gg/25/squad-builder/2e669820-9dc8-4ce7-af74-c75133f074c8/"
+        # Try multiple test URLs to find one that works
+        test_urls = [
+            "https://www.fut.gg/25/squad-builder/2e669820-9dc8-4ce7-af74-c75133f074c8/",
+            "https://www.fut.gg/25/squad-builder/123e4567-e89b-12d3-a456-426614174000/",
+            # We'll also try to find solution URLs dynamically from an SBC page
+        ]
         
-        # Extract player IDs
-        async with SolutionExtractor(use_browser=True) as extractor:
-            player_ids = await extractor.get_solution_players(test_solution_url)
+        results = []
         
-        if not player_ids:
-            return {
-                "status": "error",
-                "error": "No player IDs found in solution page"
-            }
-        
-        # Get player data from database
+        # First, try to find actual solution URLs from an SBC page
         try:
-            pool = await get_pool()
-            players = await get_player_data_from_database(player_ids, pool)
+            import httpx
+            from bs4 import BeautifulSoup
             
-            total_cost = sum(p.get("price", 0) for p in players)
-            avg_rating = sum(p.get("rating", 0) for p in players) / len(players) if players else 0
+            sbc_url = "https://www.fut.gg/sbc/players/25-1253-georgia-stanway/"
             
-            return {
-                "status": "success",
-                "test_url": test_solution_url,
-                "player_ids_found": len(player_ids),
-                "players_in_database": len(players),
-                "sample_player_ids": player_ids[:5],
-                "sample_players": players[:5],
-                "solution_stats": {
-                    "total_cost": total_cost,
-                    "average_rating": round(avg_rating, 1),
-                    "player_count": len(players)
+            async with httpx.AsyncClient() as client:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                 }
-            }
-            
+                response = await client.get(sbc_url, headers=headers, timeout=30)
+                soup = BeautifulSoup(response.text, "html.parser")
+                
+                # Look for solution links
+                found_solution_urls = []
+                for link in soup.find_all("a", href=True):
+                    href = link["href"]
+                    if "squad-builder" in href and "25/" in href:
+                        if href.startswith("/"):
+                            href = "https://www.fut.gg" + href
+                        found_solution_urls.append(href)
+                
+                if found_solution_urls:
+                    print(f"Found {len(found_solution_urls)} solution URLs from SBC page")
+                    test_urls = found_solution_urls[:3]  # Use first 3 found URLs
+                else:
+                    print("No solution URLs found on SBC page")
+        
         except Exception as e:
-            return {
-                "status": "partial_success",
-                "player_ids_found": len(player_ids),
-                "sample_player_ids": player_ids[:5],
-                "database_error": str(e),
-                "note": "Player ID extraction worked, but database lookup failed"
+            print(f"Failed to find solution URLs from SBC page: {e}")
+        
+        # Test each URL
+        async with SolutionExtractor(use_browser=False) as extractor:  # Start with static parsing
+            for test_url in test_urls:
+                try:
+                    print(f"Testing URL: {test_url}")
+                    
+                    # Extract player IDs using static method first
+                    player_ids = await extractor.get_solution_players_static(test_url)
+                    
+                    if player_ids:
+                        print(f"Found {len(player_ids)} player IDs via static method")
+                        
+                        # Try to get player data from database
+                        try:
+                            pool = await get_pool()
+                            players = await get_player_data_from_database(player_ids, pool)
+                            
+                            total_cost = sum(p.get("price", 0) for p in players if p.get("price"))
+                            avg_rating = sum(p.get("rating", 0) for p in players) / len(players) if players else 0
+                            
+                            return {
+                                "status": "success",
+                                "test_url": test_url,
+                                "extraction_method": "static",
+                                "player_ids_found": len(player_ids),
+                                "players_in_database": len(players),
+                                "sample_player_ids": player_ids[:5],
+                                "sample_players": players[:5],
+                                "solution_stats": {
+                                    "total_cost": total_cost,
+                                    "average_rating": round(avg_rating, 1),
+                                    "player_count": len(players)
+                                }
+                            }
+                            
+                        except Exception as db_e:
+                            # Return partial success - extraction worked, database failed
+                            return {
+                                "status": "partial_success",
+                                "test_url": test_url,
+                                "extraction_method": "static", 
+                                "player_ids_found": len(player_ids),
+                                "sample_player_ids": player_ids[:5],
+                                "database_error": str(db_e),
+                                "note": "Player ID extraction worked, but database lookup failed"
+                            }
+                    
+                    else:
+                        print(f"No player IDs found in {test_url}")
+                        results.append({
+                            "url": test_url,
+                            "player_ids_found": 0,
+                            "error": "No player IDs found"
+                        })
+                        
+                except Exception as e:
+                    print(f"Error testing {test_url}: {e}")
+                    results.append({
+                        "url": test_url,
+                        "error": str(e)
+                    })
+        
+        # If we get here, none of the URLs worked
+        return {
+            "status": "error",
+            "error": "No player IDs found in any test URLs",
+            "tested_urls": len(test_urls),
+            "url_results": results,
+            "debug_info": {
+                "extraction_pattern": "25-(\\d+)\\.([\\w]+)\\.webp",
+                "note": "Looking for image URLs with pattern: 25-{player_id}.{hash}.webp"
             }
+        }
             
+    except ImportError as e:
+        return {
+            "status": "error",
+            "error": "Solution extractor not available",
+            "details": str(e)
+        }
     except Exception as e:
         import traceback
         return {
             "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+@app.get("/debug/test-raw-html-extraction")
+async def test_raw_html_extraction():
+    """Test extracting player IDs from raw HTML content"""
+    try:
+        import httpx
+        import re
+        
+        # Test with a known solution URL
+        test_url = "https://www.fut.gg/25/squad-builder/2e669820-9dc8-4ce7-af74-c75133f074c8/"
+        
+        async with httpx.AsyncClient() as client:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            response = await client.get(test_url, headers=headers, timeout=30)
+            html_content = response.text
+        
+        # Look for the webp pattern in raw HTML
+        webp_pattern = r'25-(\d+)\.[\w]+\.webp'
+        matches = re.findall(webp_pattern, html_content)
+        unique_matches = list(set(matches))
+        
+        # Also look for any image URLs containing "25-"
+        img_pattern = r'src="[^"]*25-(\d+)[^"]*"'
+        img_matches = re.findall(img_pattern, html_content)
+        unique_img_matches = list(set(img_matches))
+        
+        # Look for any reference to player IDs in the HTML
+        general_pattern = r'25-(\d{6,})'  # 6+ digits after 25-
+        general_matches = re.findall(general_pattern, html_content)
+        unique_general_matches = list(set(general_matches))
+        
+        return {
+            "status": "success",
+            "test_url": test_url,
+            "html_length": len(html_content),
+            "webp_pattern_matches": {
+                "count": len(unique_matches),
+                "player_ids": unique_matches[:10]
+            },
+            "img_src_matches": {
+                "count": len(unique_img_matches), 
+                "player_ids": unique_img_matches[:10]
+            },
+            "general_25_matches": {
+                "count": len(unique_general_matches),
+                "player_ids": unique_general_matches[:10]
+            },
+            "html_sample": html_content[:1000] + "..." if len(html_content) > 1000 else html_content,
+            "patterns_tested": [
+                "25-(\\d+)\\.([\\w]+)\\.webp",
+                'src="[^"]*25-(\\d+)[^"]*"',
+                "25-(\\d{6,})"
+            ]
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error", 
             "error": str(e),
             "traceback": traceback.format_exc()
         }
