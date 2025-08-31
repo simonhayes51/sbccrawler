@@ -324,6 +324,41 @@ def analyze_api_results(results):
         "total_json": len(json_endpoints)
     }
 
+@app.get("/debug/analyze-js-module")
+async def analyze_js_module():
+    """Analyze the discovered JavaScript module"""
+    try:
+        import httpx
+        import re
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get("https://assets.fut.gg/ts/assets/_sbcListLayout-OCacVWPE.js", timeout=10)
+            js_content = response.text
+            
+            # Look for API endpoints in the JavaScript
+            api_patterns = [
+                r'"/api/[^"]*"',
+                r"'/api/[^']*'",
+                r'fetch\([^)]*\)',
+                r'axios\.[^(]*\([^)]*\)',
+                r'"https://[^"]*api[^"]*"',
+                r"'https://[^']*api[^']*'",
+            ]
+            
+            found_apis = []
+            for pattern in api_patterns:
+                matches = re.findall(pattern, js_content)
+                found_apis.extend(matches)
+            
+            return {
+                "status": "success",
+                "js_size": len(js_content),
+                "potential_apis": list(set(found_apis)),
+                "preview": js_content[:1000]
+            }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
 # Debug endpoints
 @app.get("/debug/connectivity")
 async def debug_connectivity():
