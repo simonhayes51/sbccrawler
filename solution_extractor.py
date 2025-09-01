@@ -4,38 +4,18 @@ from typing import Dict, Any, List, Optional
 from urllib.parse import urljoin
 import httpx
 from bs4 import BeautifulSoup
-import asyncpg
-
-# Optional: Only import if Playwright is available
-try:
-    from playwright.async_api import async_playwright
-    PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
-    print("⚠️ Playwright not available - using static parsing only")
 
 HOME = "https://www.fut.gg"
 
 class SolutionExtractor:
-    def __init__(self, use_browser: bool = True):
-        self.use_browser = use_browser and PLAYWRIGHT_AVAILABLE
-        self.browser = None
-        self.context = None
+    def __init__(self, use_browser: bool = False):
+        self.use_browser = False  # Disable browser for Railway compatibility
         
     async def __aenter__(self):
-        if self.use_browser:
-            try:
-                playwright = await async_playwright().__aenter__()
-                self.browser = await playwright.chromium.launch(headless=True)
-                self.context = await self.browser.new_context()
-            except Exception as e:
-                print(f"⚠️ Browser setup failed: {e}")
-                self.use_browser = False
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.browser:
-            await self.browser.close()
+        pass
 
     def extract_player_ids_from_html(self, html: str) -> List[str]:
         """Extract player IDs from webp image URLs in HTML with multiple patterns"""
@@ -93,39 +73,16 @@ class SolutionExtractor:
             print(f"  ❌ Static extraction failed: {e}")
             return []
 
-    async def get_solution_players_browser(self, solution_url: str) -> List[str]:
-        """Get player IDs from solution page using browser (for dynamic content)"""
-        if not self.context:
-            return await self.get_solution_players_static(solution_url)
-        
-        try:
-            page = await self.context.new_page()
-            await page.goto(solution_url, wait_until='networkidle', timeout=30000)
-            await page.wait_for_timeout(2000)  # Wait for images to load
-            
-            # Get the HTML after JavaScript execution
-            html = await page.content()
-            await page.close()
-            
-            return self.extract_player_ids_from_html(html)
-            
-        except Exception as e:
-            print(f"  ❌ Browser extraction failed: {e}")
-            return await self.get_solution_players_static(solution_url)
-
     async def get_solution_players(self, solution_url: str) -> List[str]:
-        """Get player IDs from solution page (tries browser first, falls back to static)"""
+        """Get player IDs from solution page"""
         print(f"📋 Extracting players from: {solution_url}")
         
-        if self.use_browser:
-            player_ids = await self.get_solution_players_browser(solution_url)
-        else:
-            player_ids = await self.get_solution_players_static(solution_url)
+        player_ids = await self.get_solution_players_static(solution_url)
         
         print(f"  ✅ Extracted {len(player_ids)} player IDs")
         return player_ids
 
-async def get_player_data_from_database(card_ids: List[str], pool: asyncpg.Pool) -> List[Dict[str, Any]]:
+async def get_player_data_from_database(card_ids: List[str], pool) -> List[Dict[str, Any]]:
     """Get player data from fut_players table using card_id column"""
     if not card_ids:
         return []
@@ -211,7 +168,7 @@ async def find_solution_urls_for_sbc(sbc_url: str) -> List[str]:
     
     return solution_urls
 
-async def get_sbc_solutions_with_players(sbc_url: str, pool: asyncpg.Pool) -> Dict[str, Any]:
+async def get_sbc_solutions_with_players(sbc_url: str, pool) -> Dict[str, Any]:
     """Get complete SBC solution data with player information"""
     print(f"\n🎯 Processing SBC: {sbc_url}")
     
@@ -227,7 +184,7 @@ async def get_sbc_solutions_with_players(sbc_url: str, pool: asyncpg.Pool) -> Di
     
     solutions = []
     
-    async with SolutionExtractor(use_browser=True) as extractor:
+    async with SolutionExtractor(use_browser=False) as extractor:
         for i, solution_url in enumerate(solution_urls[:5], 1):  # Limit to first 5 solutions
             print(f"\n📋 Solution {i}: {solution_url}")
             
@@ -286,7 +243,7 @@ async def test_solution_extraction():
         
         # Test 1: Extract player IDs from a specific solution
         print("\n📋 Test 1: Extract Player IDs from Solution URL")
-        async with SolutionExtractor(use_browser=True) as extractor:
+        async with SolutionExtractor(use_browser=False) as extractor:
             player_ids = await extractor.get_solution_players(test_solution_url)
             
             if player_ids:
