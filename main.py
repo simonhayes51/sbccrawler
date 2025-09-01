@@ -48,7 +48,50 @@ def root():
             </div>
 
             <div class="card">
-                <h3>Step 2: Test Raw HTML Extraction</h3>
+                <h3>Step 2A: Find Real Solution URLs</h3>
+                <button @click="findRealSolutionUrls" :disabled="loading">Find Working Solution URLs from SBC Pages</button>
+                <div v-if="findUrlsResult" class="log">
+                    <strong>Status:</strong> {{ findUrlsResult.status }}<br>
+                    <div v-if="findUrlsResult.status === 'success'">
+                        <strong>Solutions Found:</strong> {{ findUrlsResult.total_solutions_found }}<br>
+                        <strong>Working Solutions:</strong> {{ findUrlsResult.working_solutions }}<br>
+                        
+                        <div v-if="findUrlsResult.working_solution_details && findUrlsResult.working_solution_details.length > 0" class="success">
+                            <strong>✅ Working Solution URLs:</strong><br>
+                            <div v-for="solution in findUrlsResult.working_solution_details" :key="solution.url" style="margin: 10px 0; padding: 10px; background: #e8f5e8;">
+                                <strong>URL:</strong> {{ solution.url }}<br>
+                                <strong>HTML Length:</strong> {{ solution.html_length }} chars<br>
+                                <strong>Contains .webp:</strong> {{ solution.contains_webp ? '✅' : '❌' }}<br>
+                                <strong>Contains player-item:</strong> {{ solution.contains_player_item ? '✅' : '❌' }}<br>
+                                <div v-if="solution.pattern_results">
+                                    <strong>Pattern Results:</strong><br>
+                                    <div v-for="(result, pattern) in solution.pattern_results" :key="pattern" style="margin-left: 20px;">
+                                        • {{ pattern }}: {{ result.count }} IDs ({{ result.sample_ids.slice(0, 3).join(', ') }})
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div v-if="findUrlsResult.found_solution_urls && findUrlsResult.found_solution_urls.length > 0" class="warning">
+                            <strong>All Found URLs (first 10):</strong><br>
+                            <div v-for="url in findUrlsResult.found_solution_urls.slice(0, 10)" :key="url" style="font-size: 10px;">
+                                {{ url }}
+                            </div>
+                        </div>
+                        
+                        <div class="highlight">
+                            <strong>{{ findUrlsResult.recommendation }}</strong>
+                        </div>
+                    </div>
+                    
+                    <div v-if="findUrlsResult.error" class="error">
+                        <strong>Error:</strong> {{ findUrlsResult.error }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Step 2B: Test Raw HTML Extraction</h3>
                 <button @click="testRawHtmlExtraction" :disabled="loading">Test Pattern Matching on Raw HTML</button>
                 <div v-if="rawHtmlResult" class="log">
                     <strong>Status:</strong> {{ rawHtmlResult.status }}<br>
@@ -168,6 +211,7 @@ def root():
                 return {
                     loading: false,
                     connectivityResult: null,
+                    findUrlsResult: null,
                     rawHtmlResult: null,
                     solutionResult: null
                 }
@@ -180,6 +224,16 @@ def root():
                         this.connectivityResult = res.data;
                     } catch (e) {
                         this.connectivityResult = { success: false, message: e.message };
+                    }
+                    this.loading = false;
+                },
+                async findRealSolutionUrls() {
+                    this.loading = true;
+                    try {
+                        const res = await axios.get('/debug/find-real-solution-urls');
+                        this.findUrlsResult = res.data;
+                    } catch (e) {
+                        this.findUrlsResult = { status: 'error', error: e.message };
                     }
                     this.loading = false;
                 },
@@ -232,7 +286,123 @@ async def debug_connectivity():
             "message": f"Connection failed: {str(e)}"
         }
 
-@app.get("/debug/test-raw-html-extraction")
+@app.get("/debug/find-real-solution-urls")
+async def find_real_solution_urls():
+    """Find actual working solution URLs from SBC pages"""
+    try:
+        import httpx
+        from bs4 import BeautifulSoup
+        import re
+        
+        # Test multiple SBC pages to find solution URLs
+        sbc_pages = [
+            "https://www.fut.gg/sbc/players/25-1253-georgia-stanway/",
+            "https://www.fut.gg/sbc/live/",
+            "https://www.fut.gg/sbc/players/",
+        ]
+        
+        found_solutions = []
+        
+        async with httpx.AsyncClient() as client:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+            
+            for sbc_url in sbc_pages:
+                try:
+                    print(f"Checking SBC page: {sbc_url}")
+                    response = await client.get(sbc_url, headers=headers, timeout=30)
+                    soup = BeautifulSoup(response.text, "html.parser")
+                    
+                    # Look for solution/squad-builder links
+                    solution_patterns = [
+                        r'href="([^"]*squad-builder[^"]*)"',
+                        r'href="([^"]*solution[^"]*)"',
+                        r'href="(/25/[^"]*)"',
+                    ]
+                    
+                    for pattern in solution_patterns:
+                        matches = re.findall(pattern, response.text)
+                        for match in matches:
+                            if match.startswith("/"):
+                                match = "https://www.fut.gg" + match
+                            if "squad-builder" in match and match not in [s["url"] for s in found_solutions]:
+                                found_solutions.append({
+                                    "url": match,
+                                    "found_on": sbc_url,
+                                    "pattern": pattern
+                                })
+                    
+                    # Also look for any 25/ URLs in href attributes
+                    links = soup.find_all("a", href=True)
+                    for link in links:
+                        href = link["href"]
+                        if "/25/" in href and "squad-builder" in href:
+                            if href.startswith("/"):
+                                href = "https://www.fut.gg" + href
+                            if href not in [s["url"] for s in found_solutions]:
+                                found_solutions.append({
+                                    "url": href,
+                                    "found_on": sbc_url,
+                                    "pattern": "href_attribute"
+                                })
+                
+                except Exception as e:
+                    print(f"Error checking {sbc_url}: {e}")
+        
+        # Test each found URL to see if it contains player IDs
+        working_urls = []
+        
+        for solution in found_solutions[:10]:  # Test first 10 found URLs
+            try:
+                response = await client.get(solution["url"], headers=headers, timeout=30)
+                html = response.text
+                
+                # Test our patterns
+                pattern_results = {}
+                patterns = [
+                    ("simple_25_dot", r'25-(\d+)\.'),
+                    ("webp_specific", r'25-(\d+)\.[a-f0-9]+\.webp'),
+                    ("player_item", r'player-item/25-(\d+)\.'),
+                ]
+                
+                for name, pattern in patterns:
+                    matches = re.findall(pattern, html)
+                    if matches:
+                        pattern_results[name] = {
+                            "count": len(set(matches)),
+                            "sample_ids": list(set(matches))[:5]
+                        }
+                
+                if any(result["count"] > 0 for result in pattern_results.values()):
+                    working_urls.append({
+                        **solution,
+                        "html_length": len(html),
+                        "pattern_results": pattern_results,
+                        "contains_webp": ".webp" in html,
+                        "contains_player_item": "player-item" in html,
+                    })
+                
+            except Exception as e:
+                print(f"Error testing {solution['url']}: {e}")
+        
+        return {
+            "status": "success",
+            "total_solutions_found": len(found_solutions),
+            "tested_solutions": len(found_solutions[:10]),
+            "working_solutions": len(working_urls),
+            "found_solution_urls": [s["url"] for s in found_solutions[:20]],  # First 20
+            "working_solution_details": working_urls,
+            "recommendation": f"Found {len(working_urls)} working solution URLs with player IDs" if working_urls else "No working solution URLs found - may need different approach"
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 async def test_raw_html_extraction():
     """Test extracting player IDs from raw HTML content"""
     try:
@@ -263,17 +433,17 @@ async def test_raw_html_extraction():
         # Look for any reference to player IDs in the HTML
         general_pattern = r'25-(\d{6,})'  # 6+ digits after 25-
         general_matches = re.findall(general_pattern, html_content)
-        unique_general_matches = sorted(set(general_matches))
+        unique_general_matches = list(set(general_matches))general_matches = list(set(general_matches))
         
         # NEW: Look for ANY occurrences of "25-" to see what's actually there
         any_25_pattern = r'25-[^"\s<>]{1,20}'  # Any characters after 25- up to 20 chars
         any_25_matches = re.findall(any_25_pattern, html_content)
-        unique_any_25 = sorted(set(any_25_matches))
+        unique_any_25 = list(set(any_25_matches))
         
         # NEW: Look for card_id or cardId patterns
         card_id_patterns = [
             r'"card_id":\s*(\d+)',
-            r'"cardId":\s*(\d+)',
+            r'"cardId":\s*(\d+)', 
             r'cardId:\s*(\d+)',
             r'card-id["\']:\s*["\'](\d+)',
         ]
@@ -283,8 +453,7 @@ async def test_raw_html_extraction():
             matches = re.findall(pattern, html_content, re.IGNORECASE)
             card_id_matches.extend(matches)
         
-        unique_card_ids = sorted(set(card_id_matches))
-
+        unique_card_ids = list(set(card_id_matches))
         
         # NEW: Look for image URLs with different patterns
         img_patterns = [
