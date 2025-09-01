@@ -57,9 +57,16 @@ def root():
                         <strong>HTML Length:</strong> {{ rawHtmlResult.html_length }} chars<br>
                         
                         <div class="highlight">
-                            <strong>WebP Pattern Matches:</strong> {{ rawHtmlResult.webp_pattern_matches.count }}<br>
+                            <strong>WebP Pattern Matches (25-{id}.):</strong> {{ rawHtmlResult.webp_pattern_matches.count }}<br>
                             <div v-if="rawHtmlResult.webp_pattern_matches.player_ids.length > 0">
                                 Player IDs: {{ rawHtmlResult.webp_pattern_matches.player_ids.join(', ') }}
+                            </div>
+                        </div>
+                        
+                        <div class="success">
+                            <strong>WebP Specific Matches (25-{id}.{hash}.webp):</strong> {{ rawHtmlResult.webp_specific_matches.count }}<br>
+                            <div v-if="rawHtmlResult.webp_specific_matches.player_ids.length > 0">
+                                Player IDs: {{ rawHtmlResult.webp_specific_matches.player_ids.join(', ') }}
                             </div>
                         </div>
                         
@@ -68,6 +75,40 @@ def root():
                             <div v-if="rawHtmlResult.general_25_matches.player_ids.length > 0">
                                 Player IDs: {{ rawHtmlResult.general_25_matches.player_ids.slice(0, 10).join(', ') }}
                             </div>
+                        </div>
+                        
+                        <div v-if="rawHtmlResult.any_25_occurrences" class="warning">
+                            <strong>Any 25- Occurrences:</strong> {{ rawHtmlResult.any_25_occurrences.count }}<br>
+                            <div v-if="rawHtmlResult.any_25_occurrences.examples.length > 0">
+                                Examples: {{ rawHtmlResult.any_25_occurrences.examples.slice(0, 5).join(', ') }}
+                            </div>
+                        </div>
+                        
+                        <div v-if="rawHtmlResult.card_id_json_matches" class="success">
+                            <strong>Card ID JSON Matches:</strong> {{ rawHtmlResult.card_id_json_matches.count }}<br>
+                            <div v-if="rawHtmlResult.card_id_json_matches.card_ids.length > 0">
+                                Card IDs: {{ rawHtmlResult.card_id_json_matches.card_ids.slice(0, 5).join(', ') }}
+                            </div>
+                        </div>
+                        
+                        <div v-if="rawHtmlResult.image_url_matches" class="highlight">
+                            <strong>Image URL Matches:</strong> {{ rawHtmlResult.image_url_matches.count }}<br>
+                            <div v-if="rawHtmlResult.image_url_matches.player_ids.length > 0">
+                                Player IDs: {{ rawHtmlResult.image_url_matches.player_ids.slice(0, 5).join(', ') }}
+                            </div>
+                        </div>
+                        
+                        <div v-if="rawHtmlResult.html_samples" class="warning" style="margin-top: 15px;">
+                            <strong>HTML Analysis:</strong><br>
+                            • Contains "25-": {{ rawHtmlResult.html_samples.contains_25_dash ? '✅' : '❌' }}<br>
+                            • Contains ".webp": {{ rawHtmlResult.html_samples.contains_webp ? '✅' : '❌' }}<br>
+                            • Contains "player": {{ rawHtmlResult.html_samples.contains_player ? '✅' : '❌' }}<br>
+                            • Contains "card": {{ rawHtmlResult.html_samples.contains_card ? '✅' : '❌' }}<br>
+                            
+                            <details style="margin-top: 10px;">
+                                <summary><strong>Show HTML Sample (first 1000 chars)</strong></summary>
+                                <div style="background: #f0f0f0; padding: 10px; margin-top: 5px; font-size: 10px; max-height: 200px; overflow-y: auto; white-space: pre-wrap;">{{ rawHtmlResult.html_samples.first_1000_chars }}</div>
+                            </details>
                         </div>
                     </div>
                     
@@ -208,15 +249,55 @@ async def test_raw_html_extraction():
             response = await client.get(test_url, headers=headers, timeout=30)
             html_content = response.text
         
-        # Look for the webp pattern in raw HTML
-        webp_pattern = r'25-(\d+)\.[\w]+\.webp'
+        # Look for the webp pattern in raw HTML - FIXED PATTERN
+        # Pattern: 25-{player_id}.{anything} - capture everything between 25- and the next dot
+        webp_pattern = r'25-(\d+)\.'  # Capture digits between 25- and next dot
         matches = re.findall(webp_pattern, html_content)
         unique_matches = list(set(matches))
+        
+        # More specific webp pattern
+        webp_specific_pattern = r'25-(\d+)\.[a-f0-9]+\.webp'  # Only webp files
+        webp_matches = re.findall(webp_specific_pattern, html_content)
+        unique_webp_matches = list(set(webp_matches))
         
         # Look for any reference to player IDs in the HTML
         general_pattern = r'25-(\d{6,})'  # 6+ digits after 25-
         general_matches = re.findall(general_pattern, html_content)
-        unique_general_matches = list(set(general_matches))
+        unique_general_matches = list(set(general_matches))general_matches = list(set(general_matches))
+        
+        # NEW: Look for ANY occurrences of "25-" to see what's actually there
+        any_25_pattern = r'25-[^"\s<>]{1,20}'  # Any characters after 25- up to 20 chars
+        any_25_matches = re.findall(any_25_pattern, html_content)
+        unique_any_25 = list(set(any_25_matches))
+        
+        # NEW: Look for card_id or cardId patterns
+        card_id_patterns = [
+            r'"card_id":\s*(\d+)',
+            r'"cardId":\s*(\d+)', 
+            r'cardId:\s*(\d+)',
+            r'card-id["\']:\s*["\'](\d+)',
+        ]
+        
+        card_id_matches = []
+        for pattern in card_id_patterns:
+            matches = re.findall(pattern, html_content, re.IGNORECASE)
+            card_id_matches.extend(matches)
+        
+        unique_card_ids = list(set(card_id_matches))
+        
+        # NEW: Look for image URLs with different patterns
+        img_patterns = [
+            r'src="[^"]*player[^"]*(\d{8,})[^"]*"',  # URLs containing "player" with 8+ digits
+            r'src="[^"]*cdn[^"]*(\d{8,})[^"]*"',     # CDN URLs with 8+ digits
+            r'src="[^"]*fut\.gg[^"]*(\d{8,})[^"]*"',  # fut.gg URLs with 8+ digits
+        ]
+        
+        img_matches = []
+        for pattern in img_patterns:
+            matches = re.findall(pattern, html_content, re.IGNORECASE)
+            img_matches.extend(matches)
+        
+        unique_img_matches = list(set(img_matches))
         
         return {
             "status": "success",
@@ -226,14 +307,39 @@ async def test_raw_html_extraction():
                 "count": len(unique_matches),
                 "player_ids": unique_matches[:10]
             },
+            "webp_specific_matches": {
+                "count": len(unique_webp_matches),
+                "player_ids": unique_webp_matches[:10]
+            },
             "general_25_matches": {
                 "count": len(unique_general_matches),
                 "player_ids": unique_general_matches[:10]
             },
-            "html_sample": html_content[:1000] + "..." if len(html_content) > 1000 else html_content,
+            "any_25_occurrences": {
+                "count": len(unique_any_25),
+                "examples": unique_any_25[:10]
+            },
+            "card_id_json_matches": {
+                "count": len(unique_card_ids),
+                "card_ids": unique_card_ids[:10]
+            },
+            "image_url_matches": {
+                "count": len(unique_img_matches),
+                "player_ids": unique_img_matches[:10]
+            },
+            "html_samples": {
+                "first_1000_chars": html_content[:1000],
+                "contains_25_dash": "25-" in html_content,
+                "contains_webp": ".webp" in html_content,
+                "contains_player": "player" in html_content.lower(),
+                "contains_card": "card" in html_content.lower(),
+            },
             "patterns_tested": [
                 "25-(\\d+)\\.([\\w]+)\\.webp",
-                "25-(\\d{6,})"
+                "25-(\\d{6,})",
+                "25-[^\"\\s<>]{1,20}",
+                '"card_id":\\s*(\\d+)',
+                'src="[^"]*player[^"]*(\d{8,})[^"]*"'
             ]
         }
         
