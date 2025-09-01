@@ -263,17 +263,17 @@ async def test_raw_html_extraction():
         # Look for any reference to player IDs in the HTML
         general_pattern = r'25-(\d{6,})'  # 6+ digits after 25-
         general_matches = re.findall(general_pattern, html_content)
-        unique_general_matches = list(set(general_matches))general_matches = list(set(general_matches))
+        unique_general_matches = sorted(set(general_matches))
         
         # NEW: Look for ANY occurrences of "25-" to see what's actually there
         any_25_pattern = r'25-[^"\s<>]{1,20}'  # Any characters after 25- up to 20 chars
         any_25_matches = re.findall(any_25_pattern, html_content)
-        unique_any_25 = list(set(any_25_matches))
+        unique_any_25 = sorted(set(any_25_matches))
         
         # NEW: Look for card_id or cardId patterns
         card_id_patterns = [
             r'"card_id":\s*(\d+)',
-            r'"cardId":\s*(\d+)', 
+            r'"cardId":\s*(\d+)',
             r'cardId:\s*(\d+)',
             r'card-id["\']:\s*["\'](\d+)',
         ]
@@ -283,7 +283,8 @@ async def test_raw_html_extraction():
             matches = re.findall(pattern, html_content, re.IGNORECASE)
             card_id_matches.extend(matches)
         
-        unique_card_ids = list(set(card_id_matches))
+        unique_card_ids = sorted(set(card_id_matches))
+
         
         # NEW: Look for image URLs with different patterns
         img_patterns = [
