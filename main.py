@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from typing import List, Optional
 import os
-import asyncio
 
 app = FastAPI(title="FUT SBC Tracker")
 
@@ -11,82 +11,128 @@ def root():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>FUT SBC Debug</title>
+    <title>SBC Solution Builder</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
     <style>
-        body { font-family: system-ui; margin: 20px; background: #f0f2f5; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h1 { color: #333; margin-bottom: 20px; }
-        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .warning-button { background: #e67e22 !important; }
-        .log { background: #f8f9fa; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
-        .error { background: #f8d7da; color: #721c24; }
-        .success { background: #d4edda; color: #155724; }
-        .warning { background: #fff3cd; color: #856404; }
-        .highlight { background: #e8f5e8; padding: 5px; border-radius: 3px; margin: 5px 0; }
+        body { font-family: system-ui; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .card { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .player-card { border: 1px solid #ddd; padding: 10px; margin: 5px; border-radius: 5px; display: inline-block; min-width: 150px; }
+        .search-box { width: 300px; padding: 8px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; }
+        button { padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin: 5px; }
+        .solution-builder { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .formation { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .position { border: 2px dashed #ccc; padding: 20px; text-align: center; min-height: 100px; }
+        .position.filled { border-color: #28a745; background: #f8fff9; }
+        .stats { background: #f8f9fa; padding: 10px; border-radius: 5px; }
         [v-cloak] { display: none; }
     </style>
 </head>
 <body>
     <div id="app" v-cloak>
         <div class="container">
-            <h1>🔧 FUT SBC Debug Tool</h1>
+            <h1>SBC Solution Builder</h1>
             
-            <div class="card">
-                <h3>Step 1: Test Basic Connectivity</h3>
-                <button @click="testConnectivity" :disabled="loading">Test fut.gg Connection</button>
-                <div v-if="connectivityResult" class="log" :class="connectivityResult.success ? 'success' : 'error'">
-                    {{ connectivityResult.message }}
-                    <div v-if="connectivityResult.success">
-                        Status Code: {{ connectivityResult.status_code }}<br>
-                        Content Length: {{ connectivityResult.content_length }}
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>Step 2: Test Solution URL Finding</h3>
-                <button @click="findRealSolutionUrls" :disabled="loading">Find Working Solution URLs</button>
-                <div v-if="findUrlsResult" class="log">
-                    <strong>Status:</strong> {{ findUrlsResult.status }}<br>
-                    <div v-if="findUrlsResult.status === 'success'">
-                        <strong>Solutions Found:</strong> {{ findUrlsResult.total_solutions_found }}<br>
-                        <strong>Working Solutions:</strong> {{ findUrlsResult.working_solutions }}<br>
-                        <strong>{{ findUrlsResult.recommendation }}</strong>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>Step 3: Alternative Strategy - Direct Database Search</h3>
-                <button @click="testDatabaseSearch" :disabled="loading">Test Direct Player Database Search</button>
-                <div v-if="databaseResult" class="log">
-                    <strong>Status:</strong> {{ databaseResult.status }}<br>
-                    <div v-if="databaseResult.status === 'success'">
-                        <strong>Database Connected:</strong> {{ databaseResult.database_connected ? '✅' : '❌' }}<br>
-                        <strong>Total Players:</strong> {{ databaseResult.total_players }}<br>
-                        <div v-if="databaseResult.sample_players">
-                            <strong>Sample Players:</strong><br>
-                            <div v-for="player in databaseResult.sample_players" :key="player.card_id" style="margin-left: 20px;">
-                                • {{ player.name }} ({{ player.rating }} OVR, {{ player.position }}) - Card ID: {{ player.card_id }}
+            <div class="solution-builder">
+                <!-- Left Panel: Squad Builder -->
+                <div class="card">
+                    <h3>Squad Builder</h3>
+                    
+                    <!-- Formation (simplified 11 positions) -->
+                    <div class="formation">
+                        <div v-for="(position, index) in squad" :key="index" 
+                             class="position" 
+                             :class="{ filled: position.player }"
+                             @click="selectPosition(index)">
+                            <div v-if="position.player">
+                                <strong>{{ position.player.name }}</strong><br>
+                                {{ position.player.rating }} {{ position.player.position }}<br>
+                                {{ position.player.club }}
+                            </div>
+                            <div v-else>
+                                {{ position.name }}<br>
+                                <small>Click to add player</small>
                             </div>
                         </div>
-                        <div class="highlight">
-                            <strong>Recommendation:</strong> Since HTML scraping isn't working, you can build solutions manually using your player database or find alternative data sources.
-                        </div>
                     </div>
-                    <div v-if="databaseResult.error" class="error">
-                        <strong>Error:</strong> {{ databaseResult.error }}
+                    
+                    <!-- Squad Stats -->
+                    <div class="stats">
+                        <strong>Squad Stats:</strong><br>
+                        Players: {{ filledPositions }}/11<br>
+                        Avg Rating: {{ averageRating }}<br>
+                        Total Cost: {{ totalCost.toLocaleString() }} coins
+                    </div>
+                    
+                    <div style="margin-top: 15px;">
+                        <button @click="clearSquad">Clear Squad</button>
+                        <button @click="saveSquad" :disabled="filledPositions < 11">Save Solution</button>
+                    </div>
+                </div>
+                
+                <!-- Right Panel: Player Search -->
+                <div class="card">
+                    <h3>Player Search</h3>
+                    <div v-if="selectedPositionIndex !== null">
+                        <p><strong>Adding player for: {{ squad[selectedPositionIndex].name }}</strong></p>
+                    </div>
+                    
+                    <input v-model="searchTerm" @input="searchPlayers" 
+                           placeholder="Search players..." class="search-box">
+                    
+                    <div>
+                        <label>Min Rating: </label>
+                        <input type="number" v-model="minRating" @input="searchPlayers" style="width: 80px;">
+                        
+                        <label style="margin-left: 15px;">Position: </label>
+                        <select v-model="filterPosition" @change="searchPlayers">
+                            <option value="">Any</option>
+                            <option value="GK">GK</option>
+                            <option value="CB">CB</option>
+                            <option value="LB">LB</option>
+                            <option value="RB">RB</option>
+                            <option value="CM">CM</option>
+                            <option value="CAM">CAM</option>
+                            <option value="CDM">CDM</option>
+                            <option value="LW">LW</option>
+                            <option value="RW">RW</option>
+                            <option value="ST">ST</option>
+                        </select>
+                    </div>
+                    
+                    <div style="max-height: 400px; overflow-y: auto; margin-top: 15px;">
+                        <div v-for="player in searchResults" :key="player.card_id" 
+                             class="player-card"
+                             @click="addPlayerToSquad(player)"
+                             style="cursor: pointer;">
+                            <strong>{{ player.name }}</strong><br>
+                            {{ player.rating }} OVR {{ player.position }}<br>
+                            {{ player.club }} ({{ player.league }})<br>
+                            <small>{{ player.price ? player.price.toLocaleString() + ' coins' : 'No price' }}</small>
+                        </div>
+                        
+                        <div v-if="searchResults.length === 0 && searchTerm">
+                            No players found
+                        </div>
                     </div>
                 </div>
             </div>
             
-            <div v-if="loading" style="text-align: center; margin: 20px;">
-                <div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #f3f3f3; border-top: 2px solid #007bff; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-                <p>Loading...</p>
+            <!-- Saved Solutions -->
+            <div class="card" v-if="savedSolutions.length > 0">
+                <h3>Saved Solutions</h3>
+                <div v-for="solution in savedSolutions" :key="solution.id">
+                    <div style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 5px;">
+                        <strong>Solution {{ solution.id }}</strong> - 
+                        Avg Rating: {{ solution.avgRating }} - 
+                        Cost: {{ solution.totalCost.toLocaleString() }} coins
+                        <button @click="loadSolution(solution)" style="margin-left: 10px;">Load</button>
+                        <div style="margin-top: 10px; font-size: 12px;">
+                            {{ solution.players.map(p => p.name).join(', ') }}
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -96,209 +142,162 @@ def root():
         createApp({
             data() {
                 return {
-                    loading: false,
-                    connectivityResult: null,
-                    findUrlsResult: null,
-                    databaseResult: null
+                    squad: [
+                        { name: 'GK', player: null },
+                        { name: 'CB', player: null },
+                        { name: 'CB', player: null },
+                        { name: 'LB', player: null },
+                        { name: 'RB', player: null },
+                        { name: 'CM', player: null },
+                        { name: 'CM', player: null },
+                        { name: 'CAM', player: null },
+                        { name: 'LW', player: null },
+                        { name: 'RW', player: null },
+                        { name: 'ST', player: null }
+                    ],
+                    selectedPositionIndex: null,
+                    searchTerm: '',
+                    minRating: 75,
+                    filterPosition: '',
+                    searchResults: [],
+                    savedSolutions: [],
+                    solutionCounter: 1
+                }
+            },
+            computed: {
+                filledPositions() {
+                    return this.squad.filter(pos => pos.player).length;
+                },
+                averageRating() {
+                    const players = this.squad.filter(pos => pos.player).map(pos => pos.player);
+                    if (players.length === 0) return 0;
+                    const total = players.reduce((sum, player) => sum + player.rating, 0);
+                    return Math.round(total / players.length);
+                },
+                totalCost() {
+                    const players = this.squad.filter(pos => pos.player).map(pos => pos.player);
+                    return players.reduce((sum, player) => sum + (player.price || 0), 0);
                 }
             },
             methods: {
-                async testConnectivity() {
-                    this.loading = true;
-                    try {
-                        const res = await axios.get('/debug/connectivity');
-                        this.connectivityResult = res.data;
-                    } catch (e) {
-                        this.connectivityResult = { success: false, message: e.message };
-                    }
-                    this.loading = false;
+                selectPosition(index) {
+                    this.selectedPositionIndex = index;
                 },
-                async findRealSolutionUrls() {
-                    this.loading = true;
-                    try {
-                        const res = await axios.get('/debug/find-real-solution-urls');
-                        this.findUrlsResult = res.data;
-                    } catch (e) {
-                        this.findUrlsResult = { status: 'error', error: e.message };
+                async searchPlayers() {
+                    if (this.searchTerm.length < 2) {
+                        this.searchResults = [];
+                        return;
                     }
-                    this.loading = false;
+                    
+                    try {
+                        const params = new URLSearchParams();
+                        if (this.searchTerm) params.append('name', this.searchTerm);
+                        if (this.minRating) params.append('min_rating', this.minRating);
+                        if (this.filterPosition) params.append('position', this.filterPosition);
+                        params.append('limit', '20');
+                        
+                        const response = await axios.get(`/api/players/search?${params}`);
+                        this.searchResults = response.data.players || [];
+                    } catch (error) {
+                        console.error('Search failed:', error);
+                        this.searchResults = [];
+                    }
                 },
-                async testDatabaseSearch() {
-                    this.loading = true;
-                    try {
-                        const res = await axios.get('/debug/test-database');
-                        this.databaseResult = res.data;
-                    } catch (e) {
-                        this.databaseResult = { status: 'error', error: e.message };
+                addPlayerToSquad(player) {
+                    if (this.selectedPositionIndex !== null) {
+                        // Check if player already in squad
+                        const alreadyInSquad = this.squad.some(pos => pos.player && pos.player.card_id === player.card_id);
+                        if (alreadyInSquad) {
+                            alert('Player already in squad!');
+                            return;
+                        }
+                        
+                        this.squad[this.selectedPositionIndex].player = player;
+                        this.selectedPositionIndex = null;
                     }
-                    this.loading = false;
+                },
+                clearSquad() {
+                    this.squad.forEach(pos => pos.player = null);
+                    this.selectedPositionIndex = null;
+                },
+                saveSquad() {
+                    if (this.filledPositions < 11) {
+                        alert('Squad must be complete (11 players)');
+                        return;
+                    }
+                    
+                    const solution = {
+                        id: this.solutionCounter++,
+                        players: this.squad.map(pos => pos.player),
+                        avgRating: this.averageRating,
+                        totalCost: this.totalCost,
+                        timestamp: new Date().toLocaleString()
+                    };
+                    
+                    this.savedSolutions.push(solution);
+                    alert('Solution saved!');
+                },
+                loadSolution(solution) {
+                    solution.players.forEach((player, index) => {
+                        this.squad[index].player = player;
+                    });
                 }
+            },
+            mounted() {
+                // Initial search for high-rated players
+                this.searchTerm = '';
+                this.minRating = 80;
+                // Don't auto-search to avoid API calls
             }
         }).mount('#app');
     </script>
-    <style>
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
 </body>
 </html>
     """)
 
-@app.get("/debug/connectivity")
-async def debug_connectivity():
-    """Test basic connectivity to fut.gg"""
-    try:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            response = await client.get("https://www.fut.gg/sbc/", timeout=10)
-            return {
-                "success": True,
-                "status_code": response.status_code,
-                "message": f"Successfully connected to fut.gg (Status: {response.status_code})",
-                "content_length": len(response.text)
-            }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Connection failed: {str(e)}"
-        }
-
-@app.get("/debug/find-real-solution-urls")
-async def find_real_solution_urls():
-    """Find actual working solution URLs from SBC pages"""
-    try:
-        import httpx
-        from bs4 import BeautifulSoup
-        import re
-        
-        # Test multiple SBC pages to find solution URLs
-        sbc_pages = [
-            "https://www.fut.gg/sbc/players/25-1253-georgia-stanway/",
-            "https://www.fut.gg/sbc/live/",
-        ]
-        
-        found_solutions = []
-        
-        async with httpx.AsyncClient() as client:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-            
-            for sbc_url in sbc_pages:
-                try:
-                    response = await client.get(sbc_url, headers=headers, timeout=30)
-                    soup = BeautifulSoup(response.text, "html.parser")
-                    
-                    # Look for solution/squad-builder links
-                    links = soup.find_all("a", href=True)
-                    for link in links:
-                        href = link["href"]
-                        if "/25/" in href and "squad-builder" in href:
-                            if href.startswith("/"):
-                                href = "https://www.fut.gg" + href
-                            if href not in [s["url"] for s in found_solutions]:
-                                found_solutions.append({
-                                    "url": href,
-                                    "found_on": sbc_url
-                                })
-                
-                except Exception as e:
-                    print(f"Error checking {sbc_url}: {e}")
-        
-        return {
-            "status": "success",
-            "total_solutions_found": len(found_solutions),
-            "working_solutions": 0,  # We know they don't work from previous tests
-            "found_solution_urls": [s["url"] for s in found_solutions[:10]],
-            "recommendation": "HTML scraping approach not working - fut.gg uses dynamic content loading. Consider alternative approaches."
-        }
-        
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
-
-@app.get("/debug/test-database")
-async def test_database():
-    """Test direct access to your player database"""
-    try:
-        from db import get_pool
-        
-        pool = await get_pool()
-        
-        async with pool.acquire() as conn:
-            # Test database connection
-            total_players = await conn.fetchval("SELECT COUNT(*) FROM fut_players")
-            
-            # Get sample players
-            sample_players = await conn.fetch("""
-                SELECT card_id, name, rating, position, club, league, nation, price
-                FROM fut_players 
-                ORDER BY rating DESC
-                LIMIT 5
-            """)
-            
-            players_list = []
-            for player in sample_players:
-                players_list.append({
-                    "card_id": player["card_id"],
-                    "name": player["name"],
-                    "rating": player["rating"],
-                    "position": player["position"],
-                    "club": player["club"],
-                    "league": player["league"],
-                    "nation": player["nation"],
-                    "price": player["price"] if player["price"] else 0
-                })
-            
-            return {
-                "status": "success",
-                "database_connected": True,
-                "total_players": total_players,
-                "sample_players": players_list,
-                "message": f"Database working! Found {total_players:,} players total."
-            }
-            
-    except Exception as e:
-        return {
-            "status": "error",
-            "database_connected": False,
-            "error": str(e),
-            "message": "Database connection failed"
-        }
-
 @app.get("/api/players/search")
-async def search_players_endpoint(name: str = None, min_rating: int = None, limit: int = 20):
-    """Search players in your database"""
+async def search_players(
+    name: Optional[str] = None,
+    min_rating: Optional[int] = None,
+    position: Optional[str] = None,
+    limit: int = 20
+):
+    """Search players in database"""
     try:
         from db import get_pool
         
         pool = await get_pool()
-        
         async with pool.acquire() as conn:
             where_conditions = []
             params = []
+            param_count = 0
             
             if name:
-                where_conditions.append("name ILIKE $1")
+                param_count += 1
+                where_conditions.append(f"name ILIKE ${param_count}")
                 params.append(f"%{name}%")
             
             if min_rating:
-                param_num = len(params) + 1
-                where_conditions.append(f"rating >= ${param_num}")
+                param_count += 1
+                where_conditions.append(f"rating >= ${param_count}")
                 params.append(min_rating)
+                
+            if position:
+                param_count += 1
+                where_conditions.append(f"position = ${param_count}")
+                params.append(position)
             
             where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
             
+            param_count += 1
             params.append(limit)
-            param_num = len(params)
             
             query = f"""
                 SELECT card_id, name, rating, position, club, league, nation, price
                 FROM fut_players 
                 {where_clause}
-                ORDER BY rating DESC, price ASC
-                LIMIT ${param_num}
+                ORDER BY rating DESC, price ASC NULLS LAST
+                LIMIT ${param_count}
             """
             
             rows = await conn.fetch(query, *params)
@@ -313,21 +312,74 @@ async def search_players_endpoint(name: str = None, min_rating: int = None, limi
                     "club": row["club"],
                     "league": row["league"],
                     "nation": row["nation"],
-                    "price": row["price"] if row["price"] else 0
+                    "price": row["price"]
                 })
             
             return {
                 "status": "success",
                 "players": players,
-                "count": len(players),
-                "search_params": {"name": name, "min_rating": min_rating, "limit": limit}
+                "count": len(players)
             }
             
     except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
+        return {"status": "error", "error": str(e)}
+
+@app.post("/api/solutions/save")
+async def save_solution(solution_data: dict):
+    """Save a squad solution to database"""
+    try:
+        from db import get_pool
+        import json
+        
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            solution_id = await conn.fetchval("""
+                INSERT INTO sbc_solutions (name, players_json, avg_rating, total_cost, created_at)
+                VALUES ($1, $2, $3, $4, NOW())
+                RETURNING id
+            """, 
+                solution_data.get("name", "Manual Solution"),
+                json.dumps(solution_data.get("players", [])),
+                solution_data.get("avg_rating", 0),
+                solution_data.get("total_cost", 0)
+            )
+            
+            return {"status": "success", "solution_id": solution_id}
+            
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+@app.get("/api/solutions")
+async def get_solutions():
+    """Get saved solutions"""
+    try:
+        from db import get_pool
+        import json
+        
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, name, players_json, avg_rating, total_cost, created_at
+                FROM sbc_solutions
+                ORDER BY created_at DESC
+                LIMIT 50
+            """)
+            
+            solutions = []
+            for row in rows:
+                solutions.append({
+                    "id": row["id"],
+                    "name": row["name"],
+                    "players": json.loads(row["players_json"]),
+                    "avg_rating": row["avg_rating"],
+                    "total_cost": row["total_cost"],
+                    "created_at": row["created_at"].isoformat()
+                })
+            
+            return {"status": "success", "solutions": solutions}
+            
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 @app.get("/health")
 def health():
