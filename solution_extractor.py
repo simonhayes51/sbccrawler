@@ -18,25 +18,29 @@ class SolutionExtractor:
         pass
 
     def extract_player_ids_from_html(self, html: str) -> List[str]:
-        """Extract player IDs from webp image URLs in HTML with multiple patterns"""
+        """Extract player IDs from webp image URLs in HTML with corrected pattern"""
         print(f"  🔍 Analyzing HTML content ({len(html)} characters)")
         
-        # Multiple patterns to try
+        # The correct pattern based on the HTML structure you showed:
+        # 25-{player_id}.{hash}.webp -> we want just the player_id
         patterns = [
-            r'25-(\d+)\.[\w]+\.webp',           # Original webp pattern
-            r'src="[^"]*25-(\d+)[^"]*\.webp',   # More specific src pattern
-            r'25-(\d{6,})\.[\w]+',              # General pattern with 6+ digits  
-            r'/25-(\d+)\.[\w]+\.',              # Path-based pattern
-            r'25-(\d{8,})',                     # 8+ digit pattern (more specific)
+            r'25-(\d+)\.',                      # PRIMARY: Everything between 25- and next dot
+            r'25-(\d+)\.[a-f0-9]+\.webp',      # SPECIFIC: Only .webp files with hex hash
+            r'player-item/25-(\d+)\.',          # PATH-BASED: With player-item path
+            r'25-(\d{6,})',                     # FALLBACK: 6+ digits after 25-
         ]
         
         all_matches = set()
         
-        for pattern in patterns:
+        for i, pattern in enumerate(patterns, 1):
             matches = re.findall(pattern, html, re.IGNORECASE)
             if matches:
-                print(f"    Pattern '{pattern}' found {len(matches)} matches")
+                print(f"    Pattern {i} '{pattern}' found {len(matches)} matches")
                 all_matches.update(matches)
+                
+                # Show sample for primary pattern
+                if i == 1 and matches:
+                    print(f"      Sample IDs: {matches[:3]}")
         
         # Filter out obviously invalid IDs (too short/long)
         valid_matches = []
@@ -48,12 +52,14 @@ class SolutionExtractor:
         print(f"  ✅ Found {len(unique_ids)} unique valid player IDs")
         
         if unique_ids:
-            print(f"    Sample IDs: {unique_ids[:3]}")
+            print(f"    Final IDs: {unique_ids}")
         else:
             print("    ❌ No valid player IDs found")
-            # Debug: show some HTML content
-            sample_html = html[:500].replace('\n', ' ')
-            print(f"    HTML sample: {sample_html}...")
+            # Debug: check if we have 25- at all
+            if "25-" in html:
+                print("    🔍 Found '25-' in HTML, checking specific occurrences...")
+                test_matches = re.findall(r'25-[^\s<>"]{1,20}', html)
+                print(f"    Sample 25- occurrences: {test_matches[:5]}")
         
         return unique_ids
 
